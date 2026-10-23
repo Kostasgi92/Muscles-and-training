@@ -534,6 +534,292 @@ button { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* ------------------------------------------------------------ προβολές & προγράμματα */
+.main { grid-row: 3; }
+.credits { grid-row: 4; }
+.viewtoggle button { padding: 8px 14px; font-size: .88rem; font-weight: 600; }
+.pview {
+  grid-row: 3;
+  min-height: 0;
+  overflow-y: auto;
+  width: 100%;
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 6px 2px 28px;
+  scrollbar-width: thin;
+}
+.pv-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 20px; }
+.pview h2 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(1.9rem, 4vw, 2.6rem);
+  line-height: .95;
+  margin: 0;
+}
+.pv-sub { margin: 6px 0 0; color: var(--ink-2); max-width: 58ch; }
+.pv-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.pv-note { margin: 10px 0 0; font-size: .82rem; color: var(--ink-2); }
+.pv-status { margin: 8px 0 12px; min-height: 1.4em; font-size: .88rem; color: var(--ink-2); }
+.pcard {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 12px;
+}
+.pcard h3 {
+  font-size: 1.12rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+  margin: 0;
+}
+.pmeta { margin: 2px 0 12px; font-size: .84rem; color: var(--ink-2); }
+.pcard .chips { flex-wrap: wrap; overflow: visible; padding: 0; }
+.chip.unknown { border-style: dashed; color: var(--ink-2); }
+.pactions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
+.btn.danger { color: var(--danger); border-color: var(--danger); }
+.btn.danger.solid { background: var(--danger); color: var(--surface); }
+.confirm-text { font-size: .9rem; font-weight: 600; }
+.confirm-text.bad { color: var(--danger); }
+.pform .field { margin-bottom: 14px; }
+.pform label { display: block; font-size: .84rem; color: var(--ink-2); margin-bottom: 5px; }
+.pform input[type="text"], .pform textarea {
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: var(--r);
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+.pform textarea { min-height: 150px; resize: vertical; }
+.pform input[type="text"]:focus, .pform textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.field-hint { margin: 5px 0 0; font-size: .8rem; color: var(--ink-2); }
+.form-error { margin: 0 0 12px; font-size: .88rem; font-weight: 600; color: var(--danger); }
+.pempty { color: var(--ink-2); margin: 8px 0 0; }
+:root { --danger: #b3261e; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --danger: #ff8a80; } }
+:root[data-theme="dark"] { --danger: #ff8a80; }
+@media (max-width: 900px) {
+  .pview { overflow: visible; }
+}
+.backbar { position: sticky; top: -20px; z-index: 3; margin: -20px -22px 14px; padding: 10px 22px; background: var(--surface); border-bottom: 1px solid var(--line); border-radius: 14px 14px 0 0; }
+.backbar .btn { max-width: 100%; text-align: left; }
+@media (max-width: 900px) { .backbar { top: 0; } }
+@media (max-width: 480px) { .backbar { margin: -18px -16px 14px; padding: 10px 16px; } }
+@media (min-width: 901px) { .top .search { flex-basis: 300px; } }
+.langtoggle button { padding: 8px 10px; font-size: .82rem; font-weight: 700; }
+
+/* τρία κουμπιά προβολής + γλώσσα: ο υπότιτλος σπάει σε δύο γραμμές ώστε η κεφαλίδα να χωρά σε μία σειρά */
+@media (min-width: 901px) { .brand { max-width: 470px; } }
+
+/* ------------------------------------------------------------ αξιολόγηση προγράμματος */
+.review .rv-head { display: flex; align-items: center; gap: 16px; margin-top: 4px; }
+.rv-ring {
+  --p: 0;
+  --c: var(--accent);
+  flex: none;
+  position: relative;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  background: conic-gradient(var(--c) calc(var(--p) * 1turn), var(--surface-2) 0);
+}
+.rv-ring::before { content: ''; position: absolute; inset: 9px; border-radius: 50%; background: var(--surface); }
+.rv-ring b, .rv-ring small { position: relative; line-height: 1; }
+.rv-ring b { font-family: var(--font-display); font-weight: 800; font-size: 2.15rem; font-variant-numeric: tabular-nums; }
+.rv-ring small { color: var(--ink-2); font-size: .74rem; margin-top: 2px; }
+.rv-headtxt { min-width: 0; }
+.review .rv-headtxt h2 { font-size: 1.75rem; }
+.rv-subs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 16px; }
+.rv-subs > div { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px 10px; border-radius: 9px; background: var(--surface-2); }
+.rv-subs span { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-2); }
+.rv-pill {
+  display: inline-grid;
+  place-items: center;
+  min-width: 38px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: .8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+}
+.rv-gbars { display: grid; gap: 4px; margin-top: 14px; }
+.rv-gbar {
+  display: grid;
+  grid-template-columns: minmax(0, 8.5rem) 1fr 2.4rem;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 4px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  text-align: left;
+  font-size: .86rem;
+}
+.rv-gbar:hover { background: var(--surface-2); }
+.rv-track { height: 9px; border-radius: 5px; background: var(--surface-2); overflow: hidden; }
+.rv-track i { display: block; height: 100%; border-radius: 5px; min-width: 2px; }
+.rv-gbar b { text-align: right; font-variant-numeric: tabular-nums; }
+.rv-tabs { display: flex; gap: 4px; margin: 18px 0 12px; border-bottom: 1px solid var(--line); }
+.rv-tabs button {
+  border: none;
+  background: none;
+  padding: 9px 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  border-bottom: 2.5px solid transparent;
+  margin-bottom: -1px;
+}
+.rv-tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.review .rv-tabpanel > .sub:first-child { margin-top: 0; }
+.rv-flash { margin: 12px 0 0; padding: 9px 12px; border-radius: 9px; background: color-mix(in srgb, #2fbf71 16%, var(--surface)); font-size: .88rem; }
+.rv-note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; padding: 10px 12px; border-radius: 9px; background: var(--second-soft); font-size: .88rem; }
+
+.rv-plist { display: grid; gap: 10px; margin-top: 12px; }
+.rv-prog { border: 1.5px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--surface); }
+.rv-prog.on { border-color: var(--ink-2); }
+.rv-phead { display: flex; align-items: center; gap: 8px; }
+.rv-phead input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); flex: none; margin: 0; }
+.rv-pname { flex: 1; min-width: 0; font-weight: 700; overflow-wrap: anywhere; cursor: pointer; }
+.rv-phead select, .rv-actions select, .rv-target select {
+  height: 34px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  font: inherit;
+  font-size: .85rem;
+  color: inherit;
+  max-width: 100%;
+}
+/* οι μεγάλες επιλογές (πρότυπα, ονόματα προγραμμάτων) δεν πρέπει να φαρδαίνουν την καρτέλα */
+.rv-actions select, .rv-target select { flex: 1 1 12rem; width: 100%; min-width: 0; }
+.rv-icon { flex: none; width: 34px; height: 34px; border-radius: 8px; border: 1.5px solid var(--line); background: var(--surface); }
+.rv-icon:hover { border-color: var(--ink-2); }
+.rv-pmeta { margin: 4px 0 0 26px; font-size: .8rem; color: var(--ink-2); }
+.rv-pbody { margin-top: 10px; display: grid; gap: 8px; }
+.rv-additem input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+}
+.rv-additem input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.rv-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.rv-items li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: .9rem; }
+.rv-items li:last-child { border-bottom: none; }
+.rv-iname { min-width: 0; overflow-wrap: anywhere; }
+.rv-iname small { color: var(--accent); font-size: .7rem; }
+.rv-unknown .rv-iname { color: var(--ink-2); text-decoration: underline dashed; text-underline-offset: 3px; }
+.rv-unknown .rv-iname small { color: var(--ink-2); text-decoration: none; display: block; }
+.rv-stepper { display: inline-flex; align-items: center; border: 1.5px solid var(--line); border-radius: 8px; overflow: hidden; }
+.rv-stepper button { width: 30px; height: 30px; border: none; background: var(--surface-2); font-weight: 700; }
+.rv-stepper button:hover { background: var(--line); }
+.rv-stepper output { min-width: 3.4rem; text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; }
+.rv-stepper output small { font-weight: 400; font-size: .72rem; color: var(--ink-2); }
+.rv-x { width: 28px; height: 28px; border: none; background: none; color: var(--ink-2); font-size: 1.1rem; border-radius: 6px; }
+.rv-x:hover { color: var(--accent); background: var(--surface-2); }
+.rv-additem { display: flex; gap: 6px; }
+.rv-additem .btn { padding: 0 14px; }
+.rv-addmsg:empty { display: none; }
+.rv-addmsg .msg { margin: 0 0 6px; }
+.rv-link { border: none; background: none; padding: 4px 0; color: var(--ink-2); font-size: .82rem; text-decoration: underline; text-underline-offset: 3px; justify-self: start; text-align: left; }
+.rv-link:hover { color: var(--ink); }
+
+.review .rv-ghead { display: flex; align-items: center; justify-content: space-between; gap: 10px; scroll-margin-top: 64px; }
+.rv-mrows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.rv-mrow {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto 2rem auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  text-align: left;
+  font-size: .9rem;
+  scroll-margin-top: 64px;
+}
+.rv-mrow:hover, .rv-mrow.open { background: var(--surface-2); }
+.rv-mrow .dot { width: 10px; height: 10px; }
+.rv-mname { min-width: 0; overflow-wrap: anywhere; }
+.rv-mnum { font-variant-numeric: tabular-nums; color: var(--ink-2); text-align: right; white-space: nowrap; }
+.rv-mnum small { font-size: .72rem; }
+.rv-mdetail { padding: 6px 8px 12px 28px; font-size: .88rem; }
+.rv-mdetail p { margin: 8px 0; }
+.rv-mdetail .actions { margin-top: 12px; }
+.rv-mfull { color: var(--ink-2); font-size: .8rem; }
+.rv-vbar { position: relative; height: 10px; margin-top: 10px; border-radius: 5px; background: var(--surface-2); }
+.rv-zone { position: absolute; top: 0; bottom: 0; border-radius: 5px; background: color-mix(in srgb, #2fbf71 32%, transparent); }
+.rv-mark { position: absolute; top: -4px; width: 6px; height: 18px; margin-left: -3px; border-radius: 3px; box-shadow: 0 0 0 2px var(--surface); }
+.rv-vticks { position: relative; height: 16px; font-size: .68rem; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.rv-vticks span { position: absolute; top: 2px; transform: translateX(-50%); }
+.rv-vticks span:first-child { transform: none; }
+.rv-vticks span:last-child { transform: translateX(-100%); }
+.rv-contrib { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; }
+.rv-contrib li { display: flex; justify-content: space-between; gap: 10px; font-size: .84rem; }
+.rv-contrib small { color: var(--ink-2); }
+.rv-contrib b { font-variant-numeric: tabular-nums; }
+
+.rv-target { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: .86rem; color: var(--ink-2); margin-bottom: 12px; }
+.rv-suggs { margin: 0; padding: 0; list-style: none; counter-reset: rvsugg; display: grid; gap: 10px; }
+.rv-sugg { counter-increment: rvsugg; position: relative; padding: 12px 12px 12px 40px; border: 1px solid var(--line); border-radius: 12px; }
+.rv-sugg::before {
+  content: counter(rvsugg);
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: .72rem;
+  font-weight: 700;
+}
+.rv-sugg-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rv-sugg p { margin: 6px 0 0; font-size: .9rem; }
+.rv-sugg-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.rv-sugg-actions .btn { padding: 7px 11px; font-size: .84rem; }
+.rv-sugg.kind-region, .rv-sugg.kind-start { border-color: var(--accent); }
+.rv-suggs + .rv-link { margin-top: 8px; }
+.rv-coach { margin-top: 18px; padding-top: 4px; border-top: 1px solid var(--line); }
+.rv-coach-out:empty { display: none; }
+.rv-coach-out { font-size: .92rem; }
+.rv-coach-out p { margin: 6px 0; }
+.rv-principles { margin-top: 18px; padding: 4px 14px 12px; border-radius: 12px; background: var(--surface-2); font-size: .88rem; }
+.rv-method { margin-top: 20px; font-size: .86rem; }
+.rv-method summary { cursor: pointer; color: var(--ink-2); font-weight: 600; }
+.rv-method ul { margin-top: 8px; }
+.legend.rv-legend .lg-title { font-weight: 700; }
+@media (max-width: 600px) {
+  .legend.rv-legend { font-size: .68rem; display: grid; grid-template-columns: auto auto; gap: 3px 10px; padding: 6px 8px; }
+  .legend.rv-legend .lg-title { display: none; }
+  .legend.rv-legend .clear { grid-column: 1 / -1; }
+}
+@media (max-width: 420px) {
+  .rv-gbar { grid-template-columns: minmax(0, 6.8rem) 1fr 2.2rem; }
+  .rv-mrow { grid-template-columns: 10px minmax(0, 1fr) auto auto; }
+  .rv-mrow .rv-mnum + .rv-mnum { display: none; }
+  .rv-ring { width: 80px; height: 80px; }
+  .rv-ring b { font-size: 1.8rem; }
+}
 </style>
 
 <div class="app" id="app" data-anatomy-bytes="3523496">
@@ -541,6 +827,15 @@ button { cursor: pointer; }
     <div class="brand">
       <h1>Μυϊκός <b>Χάρτης</b></h1>
       <p>Γράψε μια άσκηση για να δεις ποιοι μύες δουλεύουν, ή πάτα έναν μυ για ασκήσεις.</p>
+    </div>
+    <div class="seg viewtoggle" id="viewToggle" role="group" aria-label="Προβολή">
+      <button type="button" data-v="map" aria-pressed="true">Χάρτης</button>
+      <button type="button" data-v="review" aria-pressed="false">Αξιολόγηση</button>
+      <button type="button" data-v="programs" aria-pressed="false">Προγράμματα</button>
+    </div>
+    <div class="seg langtoggle" id="langToggle" role="group" aria-label="Γλώσσα">
+      <button type="button" data-lang="en" aria-pressed="true">EN</button>
+      <button type="button" data-lang="el" aria-pressed="false">ΕΛ</button>
     </div>
     <form class="search" id="searchForm" role="search" autocomplete="off">
       <label for="exInput" class="sr">Άσκηση ή μυς</label>
@@ -551,7 +846,7 @@ button { cursor: pointer; }
     </form>
   </header>
 
-  <nav class="program" aria-label="Το πρόγραμμά σου">
+  <nav class="program" aria-label="Το πρόγραμμά σου" hidden>
     <span class="program-label">Το πρόγραμμά σου</span>
     <div class="chips" id="chips"></div>
   </nav>
@@ -588,10 +883,29 @@ button { cursor: pointer; }
     <aside class="panel" id="panel" aria-live="polite"></aside>
   </main>
 
+  <section class="pview" id="programsView" aria-labelledby="pvTitle" hidden>
+    <div class="pv-head">
+      <div>
+        <h2 id="pvTitle">Τα προγράμματά μου</h2>
+        <p class="pv-sub">Φτιάξε δικά σου προγράμματα και δες ποιοι μύες δουλεύουν σε καθένα.</p>
+      </div>
+      <div class="pv-actions">
+        <button type="button" class="btn ghost" id="pvSaveCurrent" hidden>Αποθήκευση του τρέχοντος προγράμματος</button>
+        <button type="button" class="btn primary" id="pvNew" disabled>＋ Νέο πρόγραμμα</button>
+      </div>
+    </div>
+    <p class="pv-note" id="pvNote"></p>
+    <p class="pv-status" id="pvStatus" role="status" aria-live="polite"></p>
+    <div id="pvList"></div>
+  </section>
+
   <footer class="credits">
     Ανατομικά μοντέλα: <a href="https://www.z-anatomy.com/" target="_blank" rel="noopener">Z-Anatomy</a> (CC BY-SA 4.0), βάσει
     <a href="https://lifesciencedb.jp/bp3d/" target="_blank" rel="noopener">BodyParts3D</a> © The Database Center for Life Science.
     Εκπαιδευτικό εργαλείο, όχι ιατρική συμβουλή.
   </footer>
 </div>
+<script src="i18n.js" defer></script>
 <script src="app.js" defer></script>
+<script src="programs.js" defer></script>
+<script src="motion.js" defer></script>

@@ -10,6 +10,15 @@
       <h1>Μυϊκός <b>Χάρτης</b></h1>
       <p>Γράψε μια άσκηση για να δεις ποιοι μύες δουλεύουν, ή πάτα έναν μυ για ασκήσεις.</p>
     </div>
+    <div class="seg viewtoggle" id="viewToggle" role="group" aria-label="Προβολή">
+      <button type="button" data-v="map" aria-pressed="true">Χάρτης</button>
+      <button type="button" data-v="review" aria-pressed="false">Αξιολόγηση</button>
+      <button type="button" data-v="programs" aria-pressed="false">Προγράμματα</button>
+    </div>
+    <div class="seg langtoggle" id="langToggle" role="group" aria-label="Γλώσσα">
+      <button type="button" data-lang="en" aria-pressed="true">EN</button>
+      <button type="button" data-lang="el" aria-pressed="false">ΕΛ</button>
+    </div>
     <form class="search" id="searchForm" role="search" autocomplete="off">
       <label for="exInput" class="sr">Άσκηση ή μυς</label>
       <input id="exInput" type="search" placeholder="π.χ. καθίσματα, bench press, δικέφαλα…" enterkeyhint="search" spellcheck="false"
@@ -19,7 +28,7 @@
     </form>
   </header>
 
-  <nav class="program" aria-label="Το πρόγραμμά σου">
+  <nav class="program" aria-label="Το πρόγραμμά σου" hidden>
     <span class="program-label">Το πρόγραμμά σου</span>
     <div class="chips" id="chips"></div>
   </nav>
@@ -56,10 +65,29 @@
     <aside class="panel" id="panel" aria-live="polite"></aside>
   </main>
 
+  <section class="pview" id="programsView" aria-labelledby="pvTitle" hidden>
+    <div class="pv-head">
+      <div>
+        <h2 id="pvTitle">Τα προγράμματά μου</h2>
+        <p class="pv-sub">Φτιάξε δικά σου προγράμματα και δες ποιοι μύες δουλεύουν σε καθένα.</p>
+      </div>
+      <div class="pv-actions">
+        <button type="button" class="btn ghost" id="pvSaveCurrent" hidden>Αποθήκευση του τρέχοντος προγράμματος</button>
+        <button type="button" class="btn primary" id="pvNew" disabled>＋ Νέο πρόγραμμα</button>
+      </div>
+    </div>
+    <p class="pv-note" id="pvNote"></p>
+    <p class="pv-status" id="pvStatus" role="status" aria-live="polite"></p>
+    <div id="pvList"></div>
+  </section>
+
   <footer class="credits">
     Ανατομικά μοντέλα: <a href="https://www.z-anatomy.com/" target="_blank" rel="noopener">Z-Anatomy</a> (CC BY-SA 4.0), βάσει
     <a href="https://lifesciencedb.jp/bp3d/" target="_blank" rel="noopener">BodyParts3D</a> © The Database Center for Life Science.
     Εκπαιδευτικό εργαλείο, όχι ιατρική συμβουλή.
   </footer>
 </div>
+<script src="i18n.js" defer></script>
 <script src="app.js" defer></script>
+<script src="programs.js" defer></script>
+<script src="motion.js" defer></script>

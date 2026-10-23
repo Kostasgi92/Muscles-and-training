@@ -1,4 +1,5 @@
-// Χτίζει το dist/: index.html (για δημοσίευση ως artifact), app.js (bundle) και anatomy.bin.
+// Χτίζει το dist/: index.html (για δημοσίευση ως artifact), app.js (bundle), anatomy.txt
+// και τα addons (i18n.js, programs.js, motion.js) που φορτώνονται δίπλα στο app.js.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +25,8 @@ const bin = path.join(root, 'public/anatomy.bin');
 fs.rmSync(path.join(dist, 'anatomy.bin'), { force: true });
 // base64 σε .txt: το claude.ai artifact σερβίρει μόνο γνωστούς τύπους αρχείων
 fs.writeFileSync(path.join(dist, 'anatomy.txt'), fs.readFileSync(bin).toString('base64'));
+// addons: απλά scripts χωρίς bundling (γλώσσα, προγράμματα, κίνηση)
+for (const f of ['i18n.js', 'programs.js', 'motion.js']) fs.copyFileSync(path.join(root, 'src/addons', f), path.join(dist, f));
 const css = fs.readFileSync(path.join(root, 'src/styles.css'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'src/index.html'), 'utf8')
   .replace('/*__CSS__*/', css)

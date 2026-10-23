@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { computeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { fetchAnatomy } from './anatomy.js';
+import { __G } from './lang.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
@@ -313,7 +314,7 @@ export class Viewer {
     renderer.toneMappingExposure = 1.02;
     renderer.setClearColor(0x000000, 0);
     container.appendChild(renderer.domElement);
-    renderer.domElement.setAttribute('aria-label', 'Τρισδιάστατο μοντέλο ανθρώπινου σώματος με τους μύες');
+    renderer.domElement.setAttribute('aria-label', __G('Τρισδιάστατο μοντέλο ανθρώπινου σώματος με τους μύες'));
     renderer.domElement.setAttribute('role', 'img');
     this.renderer = renderer;
 
@@ -506,8 +507,10 @@ export class Viewer {
   }
 
   // values: Map(meshId -> {v: 0..1, color}) — 0.5 περίπου για βοηθητικούς, 1 για κύριους
-  setHighlight(values) {
+  // xray: false → χωρίς «λάμψη» για καλυμμένους μύες (π.χ. στον χάρτη αξιολόγησης)
+  setHighlight(values, { xray = true } = {}) {
     this.hiValues = values;
+    this.xrayOn = xray;
     const any = values.size > 0;
     for (const m of this.meshes) {
       const u = m.material.userData.u;
@@ -537,9 +540,10 @@ export class Viewer {
     const toCam = new THREE.Vector3();
     for (const m of this.meshes) {
       const h = this.hiValues.get(m.userData.id);
-      const sel = this.selectedUnit && m.userData.unit === this.selectedUnit;
+      const sel = this.selectedIds?.has(m.userData.id);
       const deep = m.userData.kind === 'muscle' && (m.userData.depth > this.level || (h && h.v >= 0.99) || (sel && !h));
       let want = (h || sel) && deep && m.visible && m.material.userData.u.uFade.value > 0.5;
+      if (this.xrayOn === false && !sel) want = false;
       if (want) {
         want = m.userData.segs.some((s) => this.segOutward(m, s).dot(toCam.subVectors(cam, s.center).normalize()) > 0.2);
       }
@@ -564,7 +568,14 @@ export class Viewer {
 
   setSelected(unit) {
     this.selectedUnit = unit;
-    for (const m of this.meshes) this.animateUniform(m.material.userData.u.uSelected, unit && m.userData.unit === unit ? 1 : 0, 260);
+    this.setSelectedIds(unit ? (this.byUnit.get(unit) ?? []).map((m) => m.userData.id) : []);
+  }
+
+  // επιλογή με λίστα mesh (π.χ. ένας «μυς» της αξιολόγησης που αποτελείται από τμήματα πολλών μυών)
+  setSelectedIds(ids) {
+    this.selectedIds = new Set(ids);
+    if (!this.selectedIds.size) this.selectedUnit = null;
+    for (const m of this.meshes) this.animateUniform(m.material.userData.u.uSelected, this.selectedIds.has(m.userData.id) ? 1 : 0, 260);
     this.syncXray();
   }
 
@@ -573,8 +584,10 @@ export class Viewer {
     const id = mesh?.userData.id ?? null;
     if (id === this.hoverMesh) return;
     this.hoverMesh = id;
+    // hoverGroup: προαιρετική συνάρτηση που ορίζει ποια mesh φωτίζονται μαζί (αλλιώς όλο το unit)
+    const group = mesh && this.hoverGroup ? this.hoverGroup(mesh) : null;
     for (const m of this.meshes) {
-      const on = unit ? m.userData.unit === unit : m.userData.id === id;
+      const on = group ? group.has(m.userData.id) : unit ? m.userData.unit === unit : m.userData.id === id;
       m.material.userData.u.uHover.value = on && mesh ? (m.userData.id === id ? 1 : 0.55) : 0;
     }
     this.hoverUnit = unit;
@@ -781,7 +794,7 @@ export class Viewer {
     }
     if (this.controls.update()) this.dirty = true;
     if (!this.dirty) return;
-    if (this.hiValues.size || this.selectedUnit) {
+    if (this.hiValues.size || this.selectedIds?.size) {
       if (!this.xrayCam || this.xrayCam.distanceToSquared(this.camera.position) > 0.0025) this.syncXray();
     }
     this.dirty = false;

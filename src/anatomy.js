@@ -1,5 +1,6 @@
 // Φόρτωση και αποκωδικοποίηση του anatomy.bin (βλ. tools/build-anatomy.mjs).
 import { gunzipSync } from 'fflate';
+import { __G } from './lang.js';
 
 async function gunzip(bytes) {
   if (typeof DecompressionStream === 'function') {
@@ -48,7 +49,7 @@ export async function fetchAnatomy(url, expectedBytes, onProgress) {
 
 export function parseAnatomy(bytes) {
   const magic = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
-  if (magic !== 'MAP1') throw new Error('Μη έγκυρο αρχείο ανατομίας');
+  if (magic !== 'MAP1') throw new Error(__G('Μη έγκυρο αρχείο ανατομίας'));
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const hlen = dv.getUint32(4, true);
   const header = JSON.parse(new TextDecoder().decode(bytes.subarray(8, 8 + hlen)));
