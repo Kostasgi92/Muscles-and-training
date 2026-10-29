@@ -187,9 +187,13 @@ export function analyze(programs, exById) {
   const valid = checks.filter((c) => c.score !== null);
   const balance = valid.length ? valid.reduce((a, c) => a + c.score, 0) / valid.length : 0;
   const musclePart = wmean(muscles, 'score');
-  const overall = sessions.length ? 0.85 * musclePart + 0.15 * balance : 0;
+  // πρόοδος φορτίου (addons/progress.js): όταν υπάρχει, μετράει 12% στον συνολικό βαθμό
+  const prog = typeof window !== 'undefined' ? window.__mxProg : null;
+  const overload = prog ? prog.overload(active, exById) : null;
+  const overall = sessions.length ? (overload ? 0.75 * musclePart + 0.13 * balance + 0.12 * overload.score : 0.85 * musclePart + 0.15 * balance) : 0;
 
   return {
+    overload,
     sessions,
     weeklySessions: sessions.length,
     weeklySets: sessions.reduce((a, s) => a + s.total, 0),
@@ -197,7 +201,7 @@ export function analyze(programs, exById) {
     byId,
     groups,
     checks,
-    sub: { volume: wmean(muscles, 'vol'), frequency: wmean(muscles, 'freq'), balance },
+    sub: { volume: wmean(muscles, 'vol'), frequency: wmean(muscles, 'freq'), balance, overload: overload ? overload.score : 0 },
     overall,
     onTarget: muscles.filter((m) => m.V >= m.min && m.V <= RULES.excess).length,
   };
@@ -372,6 +376,11 @@ export function suggest(result, programs, exById) {
       });
     }
   }
+  // 8. Πρόοδος φορτίου (addons/progress.js)
+  if (typeof window !== 'undefined' && window.__mxProg) {
+    const tips = window.__mxProg.tips(result.overload);
+    if (tips.length) out.splice(Math.min(2, out.length), 0, ...tips);
+  }
   return out;
 }
 
@@ -388,5 +397,6 @@ export function summaryText(result, programs, exById) {
   for (const m of result.muscles) {
     lines.push(T(`${m.name}: ${fmt(m.V)} sets/week, ${m.hits}×/week, score ${fmt(m.score)}`, `${m.name}: ${fmt(m.V)} σετ/εβδ., ${m.hits}×/εβδ., βαθμός ${fmt(m.score)}`));
   }
+  if (typeof window !== 'undefined' && window.__mxProg) lines.push(...window.__mxProg.coachLines(result.overload));
   return lines.join('\n');
 }

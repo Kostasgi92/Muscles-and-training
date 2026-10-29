@@ -159,7 +159,7 @@ var __G=window.__mxG||(s=>s);
             mode: 'cloud',
             subscribe(fn) {
               return col.orderBy('createdAt', 'asc').onSnapshot(
-                (snap) => fn(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+                (snap) => fn(snap.docs.filter((d) => !String(d.id).startsWith('__')).map((d) => ({ id: d.id, ...d.data() }))),
                 () => { setStatus((__G("\u0394\u03b5\u03bd \u03c6\u03bf\u03c1\u03c4\u03ce\u03b8\u03b7\u03ba\u03b1\u03bd \u03c4\u03b1 \u03c0\u03c1\u03bf\u03b3\u03c1\u03ac\u03bc\u03bc\u03b1\u03c4\u03b1."))); fn([]); },
               );
             },

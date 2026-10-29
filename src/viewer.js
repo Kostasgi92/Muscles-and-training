@@ -49,6 +49,8 @@ const SHARED = {
   uClay: { value: CLAY.clone() },
   uTendon: { value: TENDON.clone() },
   uHoverColor: { value: HOVER.clone() },
+  // πόσο «δουλεύουν» οι τονισμένοι μύες τη στιγμή αυτή (κίνηση άσκησης)
+  uHiGain: { value: 1 },
   ...SKIN,
 };
 
@@ -116,6 +118,7 @@ uniform vec3 uClay;
 uniform vec3 uHiColor;
 uniform vec3 uHoverColor;
 uniform float uHi;
+uniform float uHiGain;
 uniform float uDim;
 uniform float uHover;
 uniform float uSelected;
@@ -181,7 +184,7 @@ albedo *= mix(0.8, 1.1, stri) * (1.0 - tendonMix * 0.7) + tendonMix * mix(0.94, 
 vec3 clay = uClay * mix(0.95, 1.03, stri);
 albedo = mix(albedo, mix(clay, uTendon, tendonMix * 0.45), uDim * 0.86);
 vec3 hiAlbedo = uHiColor * mix(0.84, 1.06, stri);
-albedo = mix(albedo, mix(hiAlbedo, uTendon, tendonMix * 0.55), uHi);
+albedo = mix(albedo, mix(hiAlbedo, uTendon, tendonMix * 0.55), clamp(uHi * uHiGain, 0.0, 1.0));
 albedo = mix(albedo, albedo * 1.12 + uHoverColor * 0.05, uHover);
 diffuseColor.rgb = albedo;
 `;
@@ -210,7 +213,7 @@ if (striFade > 0.0) {
 const FRAG_EMISSIVE = /* glsl */ `
 #include <emissivemap_fragment>
 float fres = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 2.2);
-totalEmissiveRadiance += uHiColor * uHi * (0.07 + 0.32 * fres);
+totalEmissiveRadiance += uHiColor * uHi * uHiGain * uHiGain * (0.07 + 0.32 * fres);
 totalEmissiveRadiance += uHoverColor * uHover * (0.04 + 0.45 * fres);
 totalEmissiveRadiance += uHiColor * uSelected * (0.05 + 0.55 * fres);
 `;
@@ -513,6 +516,8 @@ export class Viewer {
     this.posed = false;
     this.dirty = true;
   }
+
+  setHiGain(g) { SHARED.uHiGain.value = g; this.dirty = true; }
 
   // Από ποιες κατευθύνσεις φαίνεται ένα τμήμα (με τις στρώσεις του επιπέδου level): ακτίνες από
   // έξω προς δείγματα της επιφάνειάς του. Αποθηκεύεται ανά επίπεδο.
@@ -875,6 +880,7 @@ export class Viewer {
       this.dirty = true;
     }
     if (this.controls.update()) this.dirty = true;
+    if (this.onFrame) this.onFrame(now);
     if (!this.dirty) return;
     if (this.hiValues.size || this.selectedIds?.size) {
       if (!this.xrayCam || this.xrayCam.distanceToSquared(this.camera.position) > 0.0025) this.syncXray();

@@ -1,5 +1,5 @@
-// Χτίζει το dist/: index.html (για δημοσίευση ως artifact), app.js (bundle), anatomy.txt
-// και τα addons (i18n.js, programs.js, motion.js) που φορτώνονται δίπλα στο app.js.
+// Χτίζει το dist/: index.html (για δημοσίευση ως artifact), app.js (bundle), anatomy.txt, rig.txt
+// και τα addons (i18n.js, progress.js, programs.js) που φορτώνονται δίπλα στο app.js.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,8 +27,9 @@ fs.rmSync(path.join(dist, 'anatomy.bin'), { force: true });
 fs.writeFileSync(path.join(dist, 'anatomy.txt'), fs.readFileSync(bin).toString('base64'));
 // σκελετός κίνησης (tools/build-rig.mjs), φορτώνεται όταν χρειαστεί
 fs.writeFileSync(path.join(dist, 'rig.txt'), fs.readFileSync(path.join(root, 'public/rig.bin')).toString('base64'));
-// addons: απλά scripts χωρίς bundling (γλώσσα, προγράμματα, κίνηση)
-for (const f of ['i18n.js', 'programs.js', 'motion.js']) fs.copyFileSync(path.join(root, 'src/addons', f), path.join(dist, f));
+// addons: απλά scripts χωρίς bundling (γλώσσα, προγράμματα)
+for (const f of ['i18n.js', 'progress.js', 'programs.js']) fs.copyFileSync(path.join(root, 'src/addons', f), path.join(dist, f));
+fs.rmSync(path.join(dist, 'motion.js'), { force: true });
 const css = fs.readFileSync(path.join(root, 'src/styles.css'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'src/index.html'), 'utf8')
   .replace('/*__CSS__*/', css)

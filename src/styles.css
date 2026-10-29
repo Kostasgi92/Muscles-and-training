@@ -633,7 +633,8 @@ button { cursor: pointer; }
 .rv-ring small { color: var(--ink-2); font-size: .74rem; margin-top: 2px; }
 .rv-headtxt { min-width: 0; }
 .review .rv-headtxt h2 { font-size: 1.75rem; }
-.rv-subs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 16px; }
+.rv-subs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 16px; }
+@media (max-width: 480px) { .rv-subs { grid-template-columns: repeat(2, 1fr); } }
 .rv-subs > div { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px 10px; border-radius: 9px; background: var(--surface-2); }
 .rv-subs span { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-2); }
 .rv-pill {
@@ -815,4 +816,36 @@ button { cursor: pointer; }
   .rv-mrow .rv-mnum + .rv-mnum { display: none; }
   .rv-ring { width: 80px; height: 80px; }
   .rv-ring b { font-size: 1.8rem; }
+}
+
+/* ------------------------------------------------------------ κίνηση άσκησης */
+.mv { margin: 2px 0 14px; }
+.mv-bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
+.mv-btn { flex: none; display: inline-grid; place-items: center; height: 32px; min-width: 32px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font-size: .8rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mv-btn svg { width: 16px; height: 16px; }
+.mv-btn:hover { border-color: var(--accent); }
+.mv-btn[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.mv-play { width: 38px; height: 38px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.mv-play:hover { filter: brightness(1.08); }
+.mv-range { flex: 1; min-width: 0; accent-color: var(--accent); }
+.mv-note { margin: 6px 2px 0; font-size: .8rem; color: var(--ink-2); }
+.mv-loading .mv-bar { opacity: .55; pointer-events: none; }
+.mv-off { display: none; }
+.mv-steps { gap: 4px; }
+.mv-steps li { padding-left: 0; }
+.mv-steps li::before { display: none; }
+.mv-step { position: relative; display: block; width: 100%; padding: 7px 10px 7px 42px; border: 1px solid transparent; border-radius: 10px; background: none; color: inherit; font: inherit; text-align: left; line-height: 1.45; overflow: hidden; }
+.mv-step::before { content: counter(st); position: absolute; left: 8px; top: 7px; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--ink); color: var(--bg); font-size: .78rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mv-step:hover { background: var(--surface-2); }
+.mv-steps li.on .mv-step { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.mv-steps li.on .mv-step::before { background: var(--accent); color: var(--accent-ink); }
+.mv-prog { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--accent); transform-origin: left; transform: scaleX(0); opacity: 0; }
+.mv-steps li.on .mv-prog { opacity: .85; transform: scaleX(var(--mv-p, 0)); }
+.mvcap { left: 50%; bottom: 74px; transform: translateX(-50%); width: max-content; max-width: min(560px, calc(100% - 24px)); align-items: center; gap: 10px; padding: 7px 14px 7px 7px; border-radius: 12px; background: color-mix(in srgb, var(--surface) 88%, transparent); border: 1px solid var(--line); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); font-size: .86rem; line-height: 1.35; box-shadow: var(--shadow); }
+.mvcap[hidden] { display: none; }
+.mvcap .mv-btn { width: 32px; height: 32px; border-radius: 50%; padding: 0; background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.mv-cap-n { flex: none; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--accent); }
+.mv-cap-t { min-width: 0; }
+@media (max-width: 600px) {
+  .mvcap { bottom: auto; top: 56px; font-size: .8rem; }
 }

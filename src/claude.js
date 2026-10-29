@@ -2,6 +2,7 @@
 // στη βάση και για επιπλέον ιδέες ασκήσεων ανά μυ. Αν δεν είναι διαθέσιμο, η εφαρμογή
 // λειτουργεί κανονικά μόνο με την τοπική βάση.
 import { MUSCLES } from './data/muscles.js';
+import { EXERCISES } from './data/exercises.js';
 import { __G, T } from './lang.js';
 
 let samplePromise = null;
@@ -51,6 +52,9 @@ function cleanIds(list, valid) {
   return out;
 }
 const strList = (a, n) => (Array.isArray(a) ? a.map((x) => String(x).trim()).filter(Boolean).slice(0, n) : []);
+// οι ασκήσεις της βάσης, για να διαλέξει το Claude την πιο παρόμοια κίνηση (το μοντέλο τη δείχνει)
+const motionList = () => EXERCISES.map((e) => `${e.id}=${e.en}`).join('; ');
+const MOTION_IDS = new Set(EXERCISES.map((e) => e.id));
 
 export function normalizeExercise(o, fallbackName) {
   const valid = VALID();
@@ -68,6 +72,7 @@ export function normalizeExercise(o, fallbackName) {
     steps: strList(o.steps, 7),
     tips: strList(o.tips, 4),
     errs: strList(o.mistakes, 4),
+    ...(MOTION_IDS.has(String(o.motion || '').trim()) ? { like: String(o.motion).trim() } : {}),
     ai: true,
   };
 }
@@ -87,7 +92,8 @@ ${__G('Αν δεν είναι σωματική άσκηση, απάντησε {'
 ${__G('Αλλιώς απάντησε ΜΟΝΟ με ένα αντικείμενο JSON:')}
 {"recognized": true, "name_el": "${__G('ελληνικό όνομα')}", "name_en": "English name", "equipment": "${__G('εξοπλισμός')}", "aliases": ["${__G('άλλες ονομασίες')}"],
  "primary": ["${__G('1-4 ids κύριων μυών')}"], "secondary": ["${__G('0-6 ids βοηθητικών μυών')}"],
- "steps": ["${__G('3-6 σύντομα βήματα εκτέλεσης')}"], "tips": ["${__G('1-3 συμβουλές')}"], "mistakes": ["${__G('1-3 συχνά λάθη')}"]}`;
+ "steps": ["${__G('3-6 σύντομα βήματα εκτέλεσης')}"], "tips": ["${__G('1-3 συμβουλές')}"], "mistakes": ["${__G('1-3 συχνά λάθη')}"],
+ "motion": "${T('id of the most similar exercise from this list (same body position and movement): ', 'id της πιο παρόμοιας άσκησης από αυτή τη λίστα (ίδια θέση σώματος και κίνηση): ')}${motionList()}"}`;
   const res = await sample.json(prompt, { signal, onText, modelTier: 'quick', cache: { gcTime: 24 * 3600 * 1000 } });
   if (!res || res.recognized === false) return { recognized: false };
   const ex = normalizeExercise(res, text);
@@ -103,7 +109,7 @@ export async function moreExercises(unitId, existingNames, { signal } = {}) {
 
 ${__G('Πρότεινε 3 ασκήσεις που δουλεύουν ως ΚΥΡΙΟ μυ τον «')}${m.el}» (id: ${unitId}${__G(') και δεν είναι ήδη σε αυτή τη λίστα:')} ${existingNames.slice(0, 30).join(', ') || '—'}.
 ${__G('Απάντησε ΜΟΝΟ με έναν πίνακα JSON 3 αντικειμένων, το καθένα:')}
-{"name_el": "...", "name_en": "...", "equipment": "...", "primary": [ids], "secondary": [ids], "steps": ["${__G('3-5 βήματα')}"], "tips": ["1-2"], "mistakes": ["1-2"]}`;
+{"name_el": "...", "name_en": "...", "equipment": "...", "primary": [ids], "secondary": [ids], "steps": ["${__G('3-5 βήματα')}"], "tips": ["1-2"], "mistakes": ["1-2"], "motion": "${T('id of the most similar exercise: ', 'id της πιο παρόμοιας άσκησης: ')}${motionList()}"}`;
   const res = await sample.json(prompt, { signal, modelTier: 'quick', cache: { gcTime: 24 * 3600 * 1000 } });
   const arr = Array.isArray(res) ? res : Array.isArray(res?.exercises) ? res.exercises : [];
   return arr.map((o) => normalizeExercise(o)).filter(Boolean).slice(0, 4);

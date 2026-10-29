@@ -6,6 +6,12 @@ import './data/lang-apply.js';
 import { SearchIndex, CONFIDENT } from './search.js';
 import { getSample, analyzeExercise, moreExercises, coachReview, ERROR_TEXT, HIDE_CODES } from './claude.js';
 import { Viewer } from './viewer.js';
+import { fetchRig } from './rig.js';
+import * as POSE from './pose.js';
+import { Body } from './motion/body.js';
+import { Player } from './motion/player.js';
+import { MOTIONS } from './motion/library.js';
+import { MotionUI, motionBar, motionSteps, motionIdFor } from './motion/ui.js';
 import { RULES, SCORED, BANDS, analyze, suggest, summaryText, verdict, bandForScore, fmt as nf } from './review.js';
 import { TEMPLATES, PACKS } from './templates.js';
 
@@ -138,6 +144,7 @@ window.__mxProgram = {
   empty() {
     navStack.length = 0;
     cancelClaude();
+    stopMotion();
     state.mode = 'none';
     state.ex = null;
     state.unit = null;
@@ -171,12 +178,49 @@ function highlightForExercise(ex) {
   return vals;
 }
 
+// σκελετός κίνησης: φορτώνεται μία φορά, όταν χρειαστεί
+let rigPromise = null;
+function ensureRig() {
+  if (!rigPromise) rigPromise = fetchRig('rig.txt').then((rig) => { viewer.attachRig(rig); return rig; });
+  return rigPromise;
+}
+let playerPromise = null;
+function ensurePlayer() {
+  if (!playerPromise) playerPromise = ensureRig().then((rig) => new Player(viewer, new Body(rig, viewer.meshes)));
+  return playerPromise;
+}
+// κίνηση της άσκησης πάνω στο μοντέλο
+let motionUI = null;
+// για ασκήσεις του Claude χωρίς δική τους κίνηση: η πιο κοντινή άσκηση της βάσης (όνομα, αλλιώς μύες)
+function guessMotion(ex) {
+  for (const q of [ex.en, ex.el, ...(ex.aka ?? [])]) {
+    if (!q) continue;
+    const r = index.search(q, 6).filter((x) => x.type === 'exercise' && MOTIONS[x.id] && !x.ref.ai);
+    if (r[0] && r[0].score >= CONFIDENT * 0.8) return r[0].id;
+  }
+  let best = null, bs = 0;
+  for (const e of EXERCISES) {
+    const sc = ex.p.reduce((a, id) => a + (e.p.some((x) => unitOf(x) === unitOf(id)) ? 2 : e.s.some((x) => unitOf(x) === unitOf(id)) ? 0.5 : 0), 0)
+      + ex.s.reduce((a, id) => a + (e.p.concat(e.s).some((x) => unitOf(x) === unitOf(id)) ? 0.3 : 0), 0);
+    if (sc > bs) { bs = sc; best = e.id; }
+  }
+  return best;
+}
+function attachMotion() {
+  if (!viewer || !modelReady || state.mode !== 'exercise' || !state.ex) return;
+  const mid = motionIdFor(state.ex, guessMotion);
+  if (!mid) return;
+  if (!motionUI) motionUI = new MotionUI({ stage: $('#stage'), ensurePlayer, onRest: () => applyModelState(true) });
+  motionUI.attach(state.ex, mid, panel());
+}
+function stopMotion() { motionUI?.detach(); }
+
 async function initViewer() {
   const stage = $('#stage');
   const loader = $('#loader');
   try {
     viewer = new Viewer(stage, { onHover, onPick, onInteract: hideTip });
-    window.__mx = { viewer, state };
+    window.__mx = { viewer, state, ensurePlayer, MOTIONS };
   } catch (e) {
     loader.innerHTML = '<p class="msg">' + __G('Ο browser δεν υποστηρίζει WebGL, οπότε το τρισδιάστατο μοντέλο δεν μπορεί να εμφανιστεί. Η αναζήτηση και οι οδηγίες λειτουργούν κανονικά.') + '</p>';
     return;
@@ -196,6 +240,7 @@ async function initViewer() {
   for (const m of SCORED) for (const mesh of viewer.meshesFor(m.ids)) meshToScored.set(mesh.userData.id, m.id);
   // η καρτέλα μυός χρειάζεται το βάθος του μυός από το μοντέλο
   if (state.mode === 'muscle') showMuscle(state.unit, { frame: true, side: state.side });
+  else if (state.mode === 'exercise' && motionIdFor(state.ex, guessMotion)) { applyModelState(false); attachMotion(); }
   else applyModelState(true);
 }
 
@@ -323,6 +368,8 @@ function showExercise(ex, { frame = true } = {}) {
   state.unit = null;
   window.__mxSel && window.__mxSel('exercise', ex.el);
   const tags = [ex.eq ? `<span class="tag">${esc(ex.eq)}</span>` : '', ex.ai ? '<span class="tag ai">' + __G('Ανάλυση από Claude') + '</span>' : ''].join('');
+  const mid = motionIdFor(ex, guessMotion);
+  const likeName = mid && mid !== ex.id ? exById.get(mid)?.el : null;
   panel().innerHTML = `
     <article data-exid="${esc(ex.id)}">
       <div class="eyebrow"><span>${__G('Άσκηση')}</span>${tags}</div>
@@ -331,7 +378,7 @@ function showExercise(ex, { frame = true } = {}) {
       <h3>${__G('Κύριοι μύες')}</h3>
       <div class="mchips">${ex.p.map((id) => mchip(id, 'p')).join('')}</div>
       ${ex.s.length ? `<h3>${__G('Βοηθητικοί μύες')}</h3><div class="mchips">${ex.s.map((id) => mchip(id, 's')).join('')}</div>` : ''}
-      ${ex.steps?.length ? `<h3>${__G('Πώς γίνεται')}</h3>${steps(ex.steps)}` : ''}
+      ${ex.steps?.length ? `<h3>${__G('Πώς γίνεται')}</h3>${mid ? motionBar(ex, mid, likeName) + motionSteps(ex.steps) : steps(ex.steps)}` : ''}
       <div class="two">
         ${ex.tips?.length ? `<div><h3>${__G('Συμβουλές')}</h3>${list(ex.tips)}</div>` : ''}
         ${ex.errs?.length ? `<div><h3>${__G('Συχνά λάθη')}</h3>${list(ex.errs, 'notes bad')}</div>` : ''}
@@ -347,7 +394,8 @@ function showExercise(ex, { frame = true } = {}) {
   panel().querySelector('[data-act="program"]').addEventListener('click', () => showProgram());
   panel().scrollTop = 0;
   markChips();
-  applyModelState(frame);
+  if (mid && viewer && modelReady) { applyModelState(false); attachMotion(); }
+  else { stopMotion(); applyModelState(frame); }
 }
 
 function bindMuscleChips(root) {
@@ -359,6 +407,7 @@ function showMuscle(unit, { side, frame = true, part, extra } = {}) {
   if (!m) return;
   navPush('muscle:' + unit);
   cancelClaude();
+  stopMotion();
   state.mode = 'muscle';
   state.unit = unit;
   state.side = side;
@@ -475,6 +524,7 @@ function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 2
 function showProgram() {
   navPush('program:');
   cancelClaude();
+  stopMotion();
   state.mode = 'program';
   state.ex = null;
   state.unit = null;
@@ -673,6 +723,7 @@ async function addTemplates(ids) {
 function showReview({ frame = true } = {}) {
   navPush('review:');
   cancelClaude();
+  stopMotion();
   state.mode = 'review';
   state.ex = null;
   state.unit = null;
@@ -828,6 +879,7 @@ function actionLabel(a, progs) {
     const p = progs.find((x) => x.id === a.program);
     return T(`Do “${esc(p?.name)}” ${a.n}×/week`, `Κάνε το «${esc(p?.name)}» ${a.n}×/εβδ.`);
   }
+  if (a.type === 'progress') return T('Open Progress tab', 'Άνοιξε την Πρόοδο');
   return '';
 }
 
@@ -893,7 +945,7 @@ function renderReview({ fresh = false, ifChanged = false, scrollTo = null, focus
   const api = progApi();
   const ready = !!api && api.ready();
   const progs = ready ? reviewPrograms() : [];
-  const sig = JSON.stringify([ready, userProgram, progs.map((p) => [p.id, p.name, p.perWeek, p.active, p.items.map((it) => [it.name, it.ex, it.sets])])]);
+  const sig = JSON.stringify([ready, userProgram, window.__mxProg ? window.__mxProg.sig() : '', progs.map((p) => [p.id, p.name, p.perWeek, p.active, p.items.map((it) => [it.name, it.ex, it.sets])])]);
   if (ifChanged && !fresh && sig === rv.sig && $('#panel > article.review')) return;
   rv.sig = sig;
   if (ready && !rv.opened) {
@@ -924,7 +976,7 @@ function renderReview({ fresh = false, ifChanged = false, scrollTo = null, focus
     return;
   }
   const ob = bandForScore(result.overall);
-  const tabs = [['programs', T('Programs', 'Προγράμματα')], ['muscles', T('Muscles', 'Μύες')], ['tips', T('Suggestions', 'Προτάσεις')]];
+  const tabs = [['programs', T('Programs', 'Προγράμματα')], ['muscles', T('Muscles', 'Μύες')], ['progress', T('Progress', 'Πρόοδος')], ['tips', T('Suggestions', 'Προτάσεις')]];
   const nSess = result.weeklySessions;
   art.innerHTML = `
     ${eyebrow}
@@ -940,6 +992,7 @@ function renderReview({ fresh = false, ifChanged = false, scrollTo = null, focus
       <div><span>${T('Volume', 'Όγκος')}</span>${pill(result.sub.volume, bandForScore(result.sub.volume))}</div>
       <div><span>${T('Frequency', 'Συχνότητα')}</span>${pill(result.sub.frequency, bandForScore(result.sub.frequency))}</div>
       <div><span>${T('Balance', 'Ισορροπία')}</span>${pill(result.sub.balance, bandForScore(result.sub.balance))}</div>
+      <div><span>${T('Progression', 'Πρόοδος φορτίου')}</span>${pill(result.sub.overload, bandForScore(result.sub.overload))}</div>
     </div>
     <div class="rv-gbars">${result.groups.map((g) => `
       <button type="button" class="rv-gbar" data-group="${g.id}" data-key="g:${g.id}">
@@ -949,7 +1002,7 @@ function renderReview({ fresh = false, ifChanged = false, scrollTo = null, focus
       </button>`).join('')}</div>
     <div class="rv-tabs" role="tablist" aria-label="${esc(T('Review', 'Αξιολόγηση'))}">${tabs.map(([id, name]) => `<button type="button" role="tab" id="rvtab-${id}" aria-selected="${rv.tab === id}" aria-controls="rvTabpanel" data-tab="${id}" data-key="tab:${id}">${name}</button>`).join('')}</div>
     <div class="rv-tabpanel" id="rvTabpanel" role="tabpanel" aria-labelledby="rvtab-${rv.tab}">
-      ${rv.tab === 'programs' ? tabPrograms(progs) : rv.tab === 'muscles' ? tabMuscles(result) : tabTips(result, progs)}
+      ${rv.tab === 'programs' ? tabPrograms(progs) : rv.tab === 'muscles' ? tabMuscles(result) : rv.tab === 'progress' ? '<div id="rvProg"></div>' : tabTips(result, progs)}
     </div>
     <details class="rv-method">
       <summary>${T('How the score works', 'Πώς βγαίνει ο βαθμός')}</summary>
@@ -959,9 +1012,11 @@ function renderReview({ fresh = false, ifChanged = false, scrollTo = null, focus
         <li>${T('Frequency: each muscle at least twice a week (a session counts when it gives the muscle 1.5 sets or more).', 'Συχνότητα: κάθε μυς τουλάχιστον 2 φορές την εβδομάδα (μια προπόνηση μετράει αν δίνει ≥1,5 σετ στον μυ).')}</li>
         <li>${T('Distribution: up to about 10 sets for the same muscle in one session.', 'Κατανομή: έως ~10 σετ για τον ίδιο μυ σε μία προπόνηση.')}</li>
         <li>${T('Muscle score = 70% volume + 25% frequency + 5% distribution. Group score = average of its muscles, with the big muscles counting three times.', 'Βαθμός μυός = 70% όγκος + 25% συχνότητα + 5% κατανομή. Ομάδα = μέσος όρος των μυών της, με τους μεγάλους μύες να μετράνε τριπλά.')}</li>
-        <li>${T('Overall score = 85% the muscles + 15% balance (push/pull, quads/hamstrings, upper/lower body).', 'Συνολικός βαθμός = 85% οι μύες + 15% ισορροπία (ώθηση/έλξη, τετρακέφαλοι/οπίσθιοι, άνω/κάτω σώμα).')}</li>
+        <li>${T('Overall score = 75% the muscles + 13% balance (push/pull, quads/hamstrings, upper/lower body) + 12% progressive overload.', 'Συνολικός βαθμός = 75% οι μύες + 13% ισορροπία (ώθηση/έλξη, τετρακέφαλοι/οπίσθιοι, άνω/κάτω σώμα) + 12% πρόοδος φορτίου.')}</li>
+        <li>${T('Progressive overload: half of this score is how many of your exercises have a logged weight, the other half is whether you keep raising it. After 2 weeks at the same load you are ready to progress; after 4 weeks the lift counts as stalled. Log your levels in the Progress tab.', 'Πρόοδος φορτίου: το μισό του βαθμού είναι πόσες ασκήσεις έχουν καταγεγραμμένα κιλά και το άλλο μισό αν συνεχίζεις να τα ανεβάζεις. Μετά από 2 εβδομάδες με το ίδιο φορτίο είσαι έτοιμος να ανέβεις· μετά από 4 εβδομάδες η άσκηση θεωρείται κολλημένη. Κατάγραψε τα φορτία στην καρτέλα Πρόοδος.')}</li>
       </ul>
     </details>`;
+  if (window.__mxProg && rv.tab === 'progress') window.__mxProg.mountTab(art.querySelector('#rvProg'), progs);
   rv.flash = '';
   if (fresh) panel().scrollTop = 0;
   else {
@@ -1038,6 +1093,12 @@ async function onReviewClick(e) {
   if ('coach' in d) { runCoach(); return; }
   if ('coachstop' in d) { cancelClaude(); return; }
   if (d.act) {
+    if (d.act === 'progress') {
+      rv.tab = 'progress';
+      if (window.__mxProg) window.__mxProg.focus = d.ex;
+      renderReview({ scrollTo: `[data-pgex="${CSS.escape(d.ex)}"]` });
+      return;
+    }
     const progs = reviewPrograms();
     if (d.act === 'add') {
       const pid = targetOf(progs);
@@ -1282,7 +1343,7 @@ function setLevel(L) {
 }
 
 function bindControls() {
-  document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => viewer?.setView(b.dataset.view)));
+  document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => { if (!motionUI?.view(b.dataset.view)) viewer?.setView(b.dataset.view); }));
   document.querySelectorAll('#layerSeg [data-level]').forEach((b) => b.addEventListener('click', () => setLevel(Number(b.dataset.level))));
 }
 
