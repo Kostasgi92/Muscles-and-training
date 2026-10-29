@@ -161,7 +161,8 @@ export function bench({ h = 0.44, z0 = 0.35, z1 = -0.85, w = 0.29, incline = 0, 
 }
 // Στρώμα γυμναστικής
 export function floorMat({ len = 1.9, w = 0.62, z = 0, x = 0, rotY = 0 } = {}) {
-  const m = box(w, 0.012, len, V(x, 0.006, z), MAT.mat, 0.005);
+  // πάνω επιφάνεια στο ύψος MAT (lib.js), όπου ακουμπά το σώμα
+  const m = box(w, 0.015, len, V(x, 0.0075, z), MAT.mat, 0.005);
   m.rotation.y = rotY;
   m.renderOrder = -1;
   return m;

@@ -109,21 +109,31 @@ export function stand(B, k, o = {}) {
     tgt = pts.reduce((a, p) => a.add(p), V()).multiplyScalar(1 / Math.max(1, pts.length));
   }
   let dx = 0, dz = 0, hy = k.y ?? 0.852;
+  // softLegs: «μαλακό» όριο τεντώματος των ποδιών (m) — όσο ένα πόδι πλησιάζει το πλήρες τέντωμα, η
+  // λεκάνη χαμηλώνει ομαλά (ασυμπτωτικά), ώστε το γόνατο να μην «κλειδώνει» απότομα (π.χ. στο πάτημα
+  // του βαδίσματος), ενώ τα πέλματα μένουν ακριβώς στη θέση τους
+  const SOFT = o.softLegs ?? 0;
+  const softEx = (r) => softExcess(r, SOFT);
   const place = () => {
     trunk(B, k, V((k.x || 0) + dx + (o.sway ? sway(o.t || 0, o.sway) : 0), hy, (k.z || 0) + dz), o);
-    o.upper?.(B, k);
+    // πρώτα τα πόδια, μετά τα χέρια: στόχοι των χεριών πάνω στο σώμα (π.χ. στους μηρούς) θέλουν
+    // τα πόδια ήδη στη θέση τους
     let ex = 0;
     for (const s of SIDES) {
       const f = feet[s];
-      if (f) ex = Math.max(ex, (f.step ? stepFoot(B, s, f.step) : B.plant(s, f.at, f)).excess);
+      if (f) ex = Math.max(ex, softEx(f.step ? stepFoot(B, s, f.step) : B.plant(s, f.at, f)));
       else if (o.free?.[s]) B.leg(s, typeof o.free[s] === 'function' ? o.free[s](k) : o.free[s]);
     }
+    o.upper?.(B, k);
     o.after?.(B, k);
+    B.solve();
     return ex;
   };
+  // σε κάθε βήμα: πρώτα το ύψος ώστε τα πόδια να φτάνουν (σε έγκυρη στάση), μετά η ισορροπία πάνω σε
+  // αυτή τη στάση — έτσι το κέντρο μάζας αλλάζει ομαλά και η λύση δεν «πηδά» από καρέ σε καρέ
   for (let it = 0; it < 8; it++) {
-    const ex = place();
-    if (ex > 1e-4) { hy -= ex * 1.03 + 4e-4; continue; }
+    let ex = place();
+    for (let j = 0; j < 5 && ex > 2e-6; j++) { hy -= ex + 1e-6; ex = place(); }
     if (o.balance === false) break;
     const c = B.com(o.loads ? o.loads(B, k) : []);
     const ez = o.balanceZ === false ? 0 : tgt.z - c.z, exx = o.balanceX ? tgt.x - c.x : 0;
@@ -135,6 +145,18 @@ export function stand(B, k, o = {}) {
     dx *= o.balanceMix; dz *= o.balanceMix;
     place();
   }
+}
+
+// πόσο πρέπει να χαμηλώσει η λεκάνη ώστε το πόδι (αποτέλεσμα plant) να μένει μέσα στο «μαλακό» όριο
+// τεντώματος soft (m) — 0 όταν το γόνατο είναι αρκετά λυγισμένο
+// (χωρίς soft: σκληρό όριο λίγο πριν το πλήρες τέντωμα, ώστε το γόνατο να μένει σταθερά ~3° λυγισμένο
+// αντί να τρέμει γύρω από το «κλείδωμα»)
+export function softExcess(r, soft) {
+  if (!r) return 0;
+  if (r.D === undefined) return r.excess;
+  if (!soft) return Math.max(0, r.D - (r.maxLen - 4e-4));
+  const x = r.D - (r.maxLen - soft);
+  return x <= 0 ? 0 : x - soft * (1 - Math.exp(-x / soft));
 }
 
 // ------------------------------------------------------------------ ξαπλωμένος / καθιστός σε επιφάνειες
@@ -176,13 +198,18 @@ export function plankSolve(B, k, { toeZ = -0.98, support, legs, toes = 62, surfa
       B.toes(s, toes);
     }
     B.solve();
-    const toe = B.extreme((feet && feet(k)) || ['toes_L', 'toes_R', 'foot_L', 'foot_R'], (x, y) => y);
-    B.root(V(k.x || 0, 1 - toe.v + surface, toeZ - toe.p.z + 0.0), q);
+    const bones = (feet && feet(k)) || ['toes_L', 'toes_R', 'foot_L', 'foot_R'];
+    const toe = B.extreme(bones, (x, y) => y);
+    // οριζόντια θέση από σταθερό σημείο (μύτες των ποδιών που στηρίζουν), όχι από το χαμηλότερο
+    // δείγμα: αυτό μπορεί να «πηδά» από σημείο σε σημείο του πέλματος και να τινάζει το σώμα
+    const sides = SIDES.filter((s) => bones.some((b) => b.endsWith('_' + s)));
+    const tz = sides.reduce((a, s) => a + B.foot(s, 'toe').z, 0) / Math.max(1, sides.length);
+    B.root(V(k.x || 0, 1 - toe.v + surface, toeZ - (sides.length ? tz : toe.p.z)), q);
     B.solve();
     return support(B);
   };
   let a = lo, b = hi;
-  for (let i = 0; i < 22; i++) {
+  for (let i = 0; i < 16; i++) {
     const m = (a + b) / 2;
     if (solveAt(m) > 0) a = m; else b = m;
   }
@@ -208,7 +235,7 @@ export function hang(B, k, o) {
   };
   void q;
   let lo = o.yMin ?? 0.2, hi = o.yMax ?? 2.2;
-  for (let i = 0; i < 22; i++) { const m = (lo + hi) / 2; if (pose(m) > 1e-4) lo = m; else hi = m; }
+  for (let i = 0; i < 16; i++) { const m = (lo + hi) / 2; if (pose(m) > 1e-4) lo = m; else hi = m; }
   const yHang = hi + (o.slack ?? 0.004);
   const yTop = o.yTop != null ? o.yTop : yHang;
   const y = o.down ? lerp(yHang, yTop, k.lift) : lerp(yHang, yTop, k.lift);

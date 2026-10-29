@@ -223,7 +223,7 @@ export class Body {
     else if (D <= w(f1).length()) flex = f1;
     else {
       let lo = f0, hi = f1;
-      for (let i = 0; i < 22; i++) { const m = (lo + hi) / 2; if (w(m).length() > D) lo = m; else hi = m; }
+      for (let i = 0; i < 17; i++) { const m = (lo + hi) / 2; if (w(m).length() > D) lo = m; else hi = m; }
       flex = (lo + hi) / 2;
     }
     const d = T.clone().sub(S);
@@ -239,7 +239,7 @@ export class Body {
       R = frameQ(wr, ax, d, eStar);
     } else R = Q().setFromUnitVectors(wr, d);
     const maxLen = w(f0).length();
-    return { R, flex, reach: D <= maxLen + 1e-4, excess: Math.max(0, D - maxLen) };
+    return { R, flex, reach: D <= maxLen + 1e-4, excess: Math.max(0, D - maxLen), D, maxLen };
   }
 
   // Χέρι: το σημείο λαβής πάει στο T. hand = { axis: κερκιδική κατεύθυνση (λαβή μπάρας), flex: κάμψη καρπού }
@@ -247,10 +247,18 @@ export class Body {
   // at: 'grip' (κέντρο λαβής) ή 'palm' (επιφάνεια παλάμης, για στήριξη).
   // pole: κατεύθυνση (κόσμος) ή 'keep' = όπως είναι τώρα ο βραχίονας (για ομαλή μετάβαση από ορθή
   // κινηματική), με προαιρετικό poleTo/poleU για σταδιακή αλλαγή. hand: 'keep' = ο καρπός μένει ως έχει.
-  reach(s, T, { pole = V(0, 0, -1), hand = {}, at = 'grip', girdle, poleTo, poleU = 0 } = {}) {
+  // soft: «μαλακό» IK κοντά στο πλήρες τέντωμα (m) — ο αγκώνας ισιώνει ασυμπτωτικά αντί να «τινάζεται»
+  // όταν ο στόχος μπαίνει/βγαίνει από την εμβέλεια (το excess μετριέται πάντα από τον πραγματικό στόχο).
+  // Στη στήριξη με την παλάμη πιο λίγο (η παλάμη απέχει ≤ 2 mm όταν το χέρι είναι τεντωμένο) και καθόλου
+  // στη μετάβαση από ορθή κινηματική (pole 'keep'), όπου ο στόχος είναι ακριβώς η τρέχουσα θέση του χεριού.
+  // blend (0…1): ανάμειξη με τη στάση που είχε το χέρι πριν (ορθή κινηματική) — στο 0 μένει όπως ήταν,
+  // ώστε η μετάβαση σε IK να ξεκινά χωρίς τίναγμα ακόμη κι αν τα δύο μοντέλα διαφέρουν λίγο
+  reach(s, T, { pole = V(0, 0, -1), hand = {}, at = 'grip', girdle, poleTo, poleU = 0, soft = pole === 'keep' ? 0 : at === 'palm' ? 0.006 : 0.012, blend = 1 } = {}) {
     const d = this.side[s], rig = this.rig, I = this.I;
     if (girdle) this.girdle(s, girdle);
     rig.solve();
+    const CH = ['upperarm', 'forearm', 'twist', 'hand'].map((n) => I[n + '_' + s]);
+    const fk = blend < 1 ? CH.map((i) => rig.local[i].clone()) : null;
     const gI = I['girdle_' + s];
     const Sw = rig.Pw[I['upperarm_' + s]].clone();
     const Rg = rig.Rw[gI];
@@ -280,9 +288,18 @@ export class Body {
     let off = off0.clone().applyQuaternion(this.handQ[s]);
     let res = null;
     const keepTw = keepHand ? rig.local[I['twist_' + s]].clone() : null, keepH = keepHand ? rig.local[I['hand_' + s]].clone() : null;
+    const Lmax = soft > 0 ? d.a.clone().add(d.b.clone().applyQuaternion(qa(d.eAx, -this.R.elbowRest))).length() : 0;
     for (let it = 0; it < (at === 'palm' ? 9 : 5); it++) {
-      const Wt = T.clone().sub(off);
+      let Wt = T.clone().sub(off);
+      let D = 0;
+      if (soft > 0) {
+        const toW = Wt.clone().sub(Sw);
+        D = toW.length();
+        const x = D - (Lmax - soft);
+        if (x > 0 && D > 1e-6) Wt = Sw.clone().addScaledVector(toW, (Lmax - soft + soft * (1 - Math.exp(-x / soft))) / D);
+      }
       res = Body.hinge(Sw, Wt, d.a, d.b, d.eAx, this.R.elbowRest, 0, 148, pole);
+      if (soft > 0) { res.excess = Math.max(0, D - Lmax); res.reach = D <= Lmax + 1e-4; }
       const elbowL = qa(d.eAx, res.flex - this.R.elbowRest);
       rig.local[I['upperarm_' + s]].copy(Rg.clone().invert().multiply(res.R));
       rig.local[I['forearm_' + s]].copy(elbowL);
@@ -314,7 +331,9 @@ export class Body {
         // καρπός: ό,τι απομένει (με όριο)
         const rest = twQ.clone().invert().multiply(rel);
         const ang = 2 * Math.acos(clamp(Math.abs(rest.w), 0, 1)) / D2R;
-        if (ang > 85) rest.slerp(Q(), 1 - 85 / ang);
+        // όριο του καρπού· στη στήριξη με την παλάμη (π.χ. κάμψεις) χρειάζεται ~90° έκταση για επίπεδη παλάμη
+        const wMax = at === 'palm' ? 98 : 85;
+        if (ang > wMax) rest.slerp(Q(), 1 - wMax / ang);
         if (hand.mix && hand.mix.u > 0) {
           // σταδιακή μετάβαση προς σταθερό πρηνισμό/καρπό (π.χ. από τη λαβή της μπάρας στη θέση rack)
           const f = hand.mix.fk, u = Math.min(1, hand.mix.u);
@@ -333,7 +352,9 @@ export class Body {
       this.handQ[s].copy(Rh);
       off = off0.clone().applyQuaternion(Rh);
     }
+    if (fk) CH.forEach((i, j) => rig.local[i].copy(fk[j].slerp(rig.local[i], Math.max(0, blend))));
     rig.solve();
+    if (fk) this.handQ[s].copy(rig.Rw[I['hand_' + s]]);
     return res;
   }
 

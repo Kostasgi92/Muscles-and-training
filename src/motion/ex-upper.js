@@ -376,7 +376,7 @@ def('pec_deck', {
 // ===== Κάμψεις (push-up) και κάμψεις ωμοπλατών
 function pushBody(B, k, env, { scapOnly = false } = {}) {
   const hz = env.hz;
-  const handsAt = (B, s) => V(sg(s) * k.hw, FLOOR, hz + 0.02);
+  const handsAt = (B, s) => V(sg(s) * k.hw, MAT, hz + 0.02);
   const arms = (B) => {
     for (const s of SIDES) {
       B.girdle(s, { prot: k.scap, elev: 0 });
@@ -385,20 +385,14 @@ function pushBody(B, k, env, { scapOnly = false } = {}) {
     }
   };
   plankSolve(B, k, {
-    toeZ: -0.98,
+    toeZ: -0.98, surface: MAT,
     support: (B) => {
       for (const s of SIDES) B.girdle(s, { prot: k.scap, elev: 0 });
       B.solve();
       if (scapOnly || k.sh === undefined) {
-        // τεντωμένα χέρια: ο ώμος στο μήκος του χεριού πάνω από την παλάμη
-        let worst = -Infinity;
-        for (const s of SIDES) {
-          const S = B.pivot('upperarm_' + s);
-          const d = B.side[s];
-          const L = d.a.length() + d.b.length() + 0.07;
-          worst = Math.max(worst, L - S.distanceTo(handsAt(B, s)));
-        }
-        return -worst;
+        // τεντωμένα χέρια με τις παλάμες ακριβώς στο πάτωμα: θετικό = οι παλάμες «αιωρούνται» (ψηλά)
+        arms(B);
+        return Math.max(B.palm('L').y, B.palm('R').y) - MAT - 5e-4;
       }
       const sh = B.pivot('upperarm_L').add(B.pivot('upperarm_R')).multiplyScalar(0.5);
       return sh.y - k.sh;
@@ -408,16 +402,17 @@ function pushBody(B, k, env, { scapOnly = false } = {}) {
 }
 function pushInit(B, k, env) {
   if (env.hz !== undefined) return;
-  plankSolve(B, { ...k, scap: 0 }, { toeZ: -0.98, support: (B) => { B.solve(); return B.pivot('upperarm_L').y - 0.6; } });
+  plankSolve(B, { ...k, scap: 0 }, { toeZ: -0.98, surface: MAT, support: (B) => { B.solve(); return B.pivot('upperarm_L').y - 0.6; } });
   env.hz = B.pivot('upperarm_L').z;
   B.reset();
 }
 def('push_up', {
   view: { az: 72, el: 12 },
-  base: { sh: 0.6, sp: [0, 0, 0], nk: [-10, 0, 0], hw: 0.27, scap: 0, hip: 0 },
+  // πάνω: χέρια τεντωμένα αλλά όχι «κλειδωμένα» (~9° στον αγκώνα), παλάμες στο πάτωμα
+  base: { sh: 0.56, sp: [0, 0, 0], nk: [-10, 0, 0], hw: 0.27, scap: 0, hip: 0 },
   keys: {
-    setup: { sh: 0.6, scap: 4, hip: 8, sp: [2, 0, 0] },
-    brace: { sh: 0.6, scap: 2, hip: 0 },
+    setup: { sh: 0.56, scap: 4, hip: 8, sp: [2, 0, 0] },
+    brace: { sh: 0.56, scap: 2, hip: 0 },
     bottom: { sh: 0.2, scap: -12, nk: [-14, 0, 0] },
   },
   seq: [['setup', 1.2, 0, { act: 'setup' }], ['brace', 0.9, 1, { act: 'iso' }], ['bottom', 1.7, 2, { act: 'ecc' }], ['brace', 1.1, 3, { act: 'con', hold: 0.3 }]],
@@ -471,7 +466,7 @@ def('dips', {
     };
     // πάνω: ψηλότερη θέση με τεντωμένα χέρια· κάτω: ώμοι στο ύψος των αγκώνων
     let lo = DIP.y - 0.9, hi = DIP.y + 0.3;
-    for (let i = 0; i < 22; i++) { const m = (lo + hi) / 2; if (pose(m) > 1e-4) hi = m; else lo = m; }
+    for (let i = 0; i < 15; i++) { const m = (lo + hi) / 2; if (pose(m) > 1e-4) hi = m; else lo = m; }
     const yTop = lo - 0.004;
     pose(lerp(yTop - 0.3, yTop, k.lift));
   },
@@ -740,7 +735,9 @@ def('face_pull', {
         const p = smooth(k.p);
         for (const s of SIDES) {
           const S = B.pivot('upperarm_' + s);
-          const L = armReach(B, s, 6);
+          // αρχή με ελαφρά λυγισμένους αγκώνες (~20°, όχι κλειδωμένους): ομαλό ξεκίνημα της έλξης
+          // (με τον καρπό στραμμένο για το σχοινί, η πραγματική εμβέλεια είναι ~2,5 cm μικρότερη)
+          const L = armReach(B, s, 18) - 0.042;
           const ext = V(sg(s) * 0.07, FP.y - 0.06, S.z + Math.sqrt(Math.max(0.01, L * L - (FP.y - 0.06 - S.y) ** 2 - (sg(s) * 0.07 - S.x) ** 2)));
           const ear = B.pt('head', V(sg(s) * 0.15, 1.6, 0.0));
           const T = ext.clone().lerp(ear, p);

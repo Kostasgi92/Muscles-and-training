@@ -598,7 +598,7 @@ def('side_bend', {
         B.solve();
         env.dbHand = k.hand;
       },
-      loads: () => [{ p: B.grip(k.hand < 0.5 ? 'L' : 'R'), kg: 20 }],
+      loads: () => { const h = smooth(clamp(k.hand, 0, 1)); return [{ p: B.grip('L'), kg: 20 * (1 - h) }, { p: B.grip('R'), kg: 20 * h }]; },
     });
   },
   update(props, B, k, env) {
@@ -624,24 +624,29 @@ function walkPose(B, k, ctx, { both = true, kg = 24, segs }) {
   const v = g.v;
   env.zRoot = g.root;
   const kk = { ...k, x: g.sway, z: g.root + (k.z || 0), y: (k.y ?? 0.85) + g.bob - 0.02 * v, yaw: g.rot * 0.5, sp: [k.sp?.[0] ?? 0, k.sp?.[1] ?? 0, -g.rot * 0.9] };
-  const loadedSide = (s) => both || (s === 'L' ? (k.hand ?? 0) < 0.5 : (k.hand ?? 0) >= 0.5);
+  // πόσο «φορτωμένο» είναι κάθε χέρι (0…1): με ένα βάρος, η αλλαγή χεριού γίνεται σταδιακά
+  const hR = smooth(clamp(k.hand ?? 0, 0, 1));
+  const loadOf = (s) => (both ? 1 : s === 'L' ? 1 - hR : hR);
+  const ARM = ['upperarm', 'forearm', 'twist', 'hand'];
   // ισορροπία όσο στέκεται· σβήνει μόλις ξεκινά το βάδισμα
   const bal = 1 - smooth(clamp(v * 4, 0, 1));
   stand(B, kk, {
-    t: ctx.t, balance: bal > 0.001, balanceMix: bal,
+    t: ctx.t, balance: bal > 0.001, balanceMix: bal, softLegs: 0.008,
     feet: () => ({ L: { step: g.L }, R: { step: g.R } }),
     upper: (B) => {
       const pick = smooth(clamp(k.pick ?? 0, 0, 1)), pass = smooth(clamp(k.pass ?? 0, 0, 1));
       for (const s of SIDES) {
-        const loaded = loadedSide(s);
-        B.girdle(s, { elev: loaded ? -3 : 0, prot: 0 });
-        if (loaded) B.arm(s, { plane: 92, elev: 4, rot: 0, elbow: 6, pron: 86 });
-        else {
-          // το ελεύθερο χέρι αιωρείται αντίθετα από το πόδι της ίδιας πλευράς
-          const swing = s === 'L' ? g.armL : g.armR;
-          armSag(B, s, { flex: swing, abd: 7, rot: 0, elbow: 16 + Math.max(0, swing) * 0.6, pron: 86 });
+        const w = loadOf(s);
+        B.girdle(s, { elev: -3 * w, prot: 0 });
+        // ελεύθερο χέρι: αιωρείται αντίθετα από το πόδι της ίδιας πλευράς· φορτωμένο: κρέμεται τεντωμένο
+        const swing = s === 'L' ? g.armL : g.armR;
+        armSag(B, s, { flex: swing, abd: 7, rot: 0, elbow: 16 + Math.max(0, swing) * 0.6, pron: 86 });
+        if (w > 0) {
+          const free = ARM.map((n) => B.rig.local[B.I[n + '_' + s]].clone());
+          B.arm(s, { plane: 92, elev: 4, rot: 0, elbow: 6, pron: 86 });
+          if (w < 1) ARM.forEach((n, i) => { const q = B.rig.local[B.I[n + '_' + s]]; q.copy(free[i].slerp(q, w)); });
         }
-        B.fingers(s, loaded ? 1 : lerp(0.25, 1, pass));
+        B.fingers(s, lerp(lerp(0.25, 1, pass), 1, w));
       }
       if (pick > 0.001 || pass > 0.001) {
         B.solve();
@@ -651,11 +656,11 @@ function walkPose(B, k, ctx, { both = true, kg = 24, segs }) {
           let T = fk;
           if (pick > 0.001) T = fk.clone().lerp(V(sg(s) * 0.28, 0.065, g.root + 0.04), pick);
           if (pass > 0.001) T = T.clone().lerp(front.clone().add(V(sg(s) * 0.06, 0, 0)), pass);
-          B.reach(s, T, { pole: 'keep', hand: 'keep' });
+          B.reach(s, T, { pole: 'keep', hand: 'keep', blend: smooth(clamp(Math.max(pick, pass) * 3, 0, 1)) });
         }
       }
     },
-    loads: () => SIDES.filter(loadedSide).map((s) => ({ p: B.grip(s), kg })),
+    loads: () => SIDES.map((s) => ({ p: B.grip(s), kg: kg * loadOf(s) })).filter((l) => l.kg > 0),
   });
 }
 function weightAt(obj, B, s, env, k) {

@@ -42,14 +42,15 @@ function barHinge(B, k, ctx, o) {
         let T = c.clone().add(V(sg(s) * w, 0, 0));
         if (!held) {
           // από τους μηρούς προς τη μπάρα στο έδαφος
-          const thigh = B.pt('thigh_' + s, V(sg(s) * 0.095, 0.62, 0.115));
+          const thigh = B.pt('thigh_' + s, V(sg(s) * 0.095, 0.66, 0.115));
           T = thigh.lerp(T, smooth(hold));
         }
         B.reach(s, T, { pole: o.pole ? o.pole(s, k) : V(sg(s) * 0.2, 0.1, -1), hand: { axis: o.grip ? o.grip(s) : over(s, X), flex: o.wflex ?? 0 } });
         B.fingers(s, 0.25 + 0.75 * smooth(hold));
       }
     },
-    loads: () => (env.barHeld && env.bar ? [{ p: env.bar, kg: o.kg ?? 80 }] : []),
+    // το βάρος της μπάρας περνά σταδιακά στην ισορροπία όσο τη «φορτώνει» (όχι απότομα)
+    loads: () => (env.bar && (k.hold ?? 1) > 0 ? [{ p: env.bar, kg: (o.kg ?? 80) * smooth(clamp(k.hold ?? 1, 0, 1)) }] : []),
   });
 }
 // θέσεις με «by» (ύψος μπάρας): βρίσκουμε το ύψος της λεκάνης ώστε τα τεντωμένα χέρια να φτάνουν
@@ -98,7 +99,7 @@ def('deadlift', {
 // ===== Ρουμάνικη άρση (RDL)
 def('rdl', {
   view: { az: 70, el: 8 },
-  base: { y: 0.85, pitch: 0, sp: [-2, 0, 0], nk: [0, 0, 0], stance: 0.24, toe: 6, hold: 1 },
+  base: { y: 0.85, pitch: 0, sp: [-2, 0, 0], nk: [0, 0, 0], stance: 0.24, toe: 6, hold: 1, gpr: 0 },
   keys: {
     stand: { y: 0.852, pitch: 0 },
     soft: { y: 0.836, pitch: 3 },
@@ -120,7 +121,7 @@ def('sumo_deadlift', {
   view: { az: 34, el: 8 },
   base: { y: 0.85, pitch: 0, sp: [0, 0, 0], nk: [0, 0, 0], stance: 0.74, toe: 36, hold: 0, tz: 0.012 },
   keys: {
-    stand: { y: 0.84, pitch: 0, hold: 0 },
+    stand: { y: 0.8, pitch: 0, hold: 0 },
     grip: { y: 0.5, pitch: 50, sp: [10, 0, 0], nk: [-6, 0, 0], hold: 1, by: DL.floorY, tz: -0.02 },
     set: { y: 0.49, pitch: 46, sp: [-4, 0, 0], nk: [-14, 0, 0], hold: 1, by: DL.floorY + 0.004, tz: -0.035 },
     knee: { y: 0.66, pitch: 30, sp: [-3, 0, 0], nk: [-8, 0, 0], hold: 1, by: 0.48, tz: -0.015 },
@@ -256,7 +257,7 @@ def('barbell_row', {
 const DBR = { x: -0.13, h: 0.44 };
 def('db_row', {
   view: { az: 62, el: 14 },
-  base: { p: 0, sp: [0, 0, 0], nk: [-12, 0, 0] },
+  base: { p: 0, sp: [0, 0, 0], nk: [-12, 0, 0], gpr: 0 },
   keys: {
     setup: { p: 0 },
     hang: { p: 0, gpr: 8 },
@@ -906,7 +907,7 @@ def('bench_dips', {
       return ex;
     };
     let lo = 0.1, hi = 1.2;
-    for (let i = 0; i < 22; i++) { const m = (lo + hi) / 2; if (pose(m) > 1e-4) hi = m; else lo = m; }
+    for (let i = 0; i < 15; i++) { const m = (lo + hi) / 2; if (pose(m) > 1e-4) hi = m; else lo = m; }
     const yTop = lo - 0.004;
     pose(lerp(yTop - 0.28, yTop, k.lift));
   },
@@ -946,7 +947,7 @@ def('kickback', {
 // ===== Κάμψεις καρπών (wrist curl / reverse)
 function wristCurl(id, { reverse = false }) {
   def(id, {
-    view: { az: 84, el: 16, focus: 'hand_L', fb: 0.32 },
+    view: { az: 58, el: 22, focus: 'hand_L', fb: 0.4 },
     base: { pitch: 30, z: 0.0, sp: [10, 0, 0], nk: [16, 0, 0], wf: reverse ? 30 : -40, fg: reverse ? 1 : 0.4 },
     keys: reverse
       ? { setup: { wf: 32, fg: 1 }, up: { wf: -52, fg: 1 } }

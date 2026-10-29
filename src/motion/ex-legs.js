@@ -4,7 +4,7 @@ import * as P from './props.js';
 import {
   def, MOTIONS, SIDES, V, sg, other, FLOOR, MAT, D2R, lerp, smooth, X, Y, Z, over, under, Body, clamp,
   barFromHands, placeBar, inHand, kbInHands, rest, BACK, TRUNK, stand, onSurface, sit, trunk, armsFK, armsSag, armSag, dirToArm,
-  armReach, feetPair, sway, breath,
+  armReach, feetPair, sway, breath, softExcess,
 } from './lib.js';
 import { barOnBack } from './ex-back-arms.js';
 
@@ -164,7 +164,7 @@ def('lunge', {
   loop: 1,
   pose(B, k, ctx) {
     stand(B, k, {
-      t: ctx.t, balance: false,
+      t: ctx.t, balance: false, softLegs: 0.008,
       feet: stepFeet,
       upper: (B) => { for (const s of SIDES) { B.girdle(s, { elev: -2 }); B.arm(s, { plane: 92, elev: 8, rot: 0, elbow: 14, pron: 80 }); B.fingers(s, 0.3); } },
     });
@@ -191,7 +191,7 @@ def('walking_lunge', {
   wrap: 1.56,
   setup: (props, env) => dbPair(props, env),
   pose(B, k, ctx) {
-    stand(B, k, { t: ctx.t, balance: false, feet: stepFeet, upper: (B) => hangArms(B), loads: () => dbLoads(B) });
+    stand(B, k, { t: ctx.t, balance: false, softLegs: 0.008, feet: stepFeet, upper: (B) => hangArms(B), loads: () => dbLoads(B) });
   },
   update: dbUpdate,
 });
@@ -214,7 +214,7 @@ def('lateral_lunge', {
   loop: 1,
   pose(B, k, ctx) {
     stand(B, k, {
-      t: ctx.t, balance: false,
+      t: ctx.t, balance: false, softLegs: 0.008,
       feet: (k) => ({
         L: { at: V(0.11 + k.fL[3] * 1, FLOOR + k.fL[1], k.fL[0]), yaw: 10 + k.fL[3] * 20, pole: V(0.5, 0, 1) },
         R: { at: V(-0.11 - k.fR[3] * 1, FLOOR + k.fR[1], k.fR[0]), yaw: 10 + k.fR[3] * 20, pole: V(-0.5, 0, 1) },
@@ -896,10 +896,17 @@ def('wall_sit', {
   loop: 1,
   setup(props) { props.add('wall', P.wall({ z: WALL, w: 1.4, h: 2.0 })); },
   pose(B, k, ctx) {
-    trunk(B, k, V(0, k.y, 0), { t: ctx.t, breathe: 0.6 });
-    for (const s of SIDES) { B.girdle(s, { prot: -2 }); B.arm(s, { plane: 70, elev: 16, rot: 0, elbow: 30, pron: 60 }); B.fingers(s, 0.2); }
-    rest(B, [{ bones: ['chest', 'pelvis', 'spine2', 'girdle_L', 'girdle_R'], n: Z, d: WALL }]);
-    for (const s of SIDES) B.plant(s, V(sg(s) * 0.15, FLOOR, 0.2), { yaw: 8, pole: V(sg(s) * 0.15, 0, 1) });
+    // όρθιος στον τοίχο: η λεκάνη όσο ψηλά φτάνουν τα πόδια, με μαλακά γόνατα (όχι απότομο «κλείδωμα»)
+    let y = k.y;
+    for (let it = 0; it < 6; it++) {
+      trunk(B, k, V(0, y, 0), { t: ctx.t, breathe: 0.6 });
+      for (const s of SIDES) { B.girdle(s, { prot: -2 }); B.arm(s, { plane: 70, elev: 16, rot: 0, elbow: 30, pron: 60 }); B.fingers(s, 0.2); }
+      rest(B, [{ bones: ['chest', 'pelvis', 'spine2', 'girdle_L', 'girdle_R'], n: Z, d: WALL }]);
+      let ex = 0;
+      for (const s of SIDES) ex = Math.max(ex, softExcess(B.plant(s, V(sg(s) * 0.15, FLOOR, 0.2), { yaw: 8, pole: V(sg(s) * 0.15, 0, 1) }), 0.01));
+      if (ex < 1e-4) break;
+      y -= ex * 1.05 + 2e-4;
+    }
   },
 });
 
@@ -1049,7 +1056,8 @@ function cleanPose(B, k, ctx) {
 const CALF = { h: 0.12 };
 def('calf_raise', {
   view: { az: 70, el: 10, zoom: 1.15 },
-  base: { y: 0.85 + CALF.h, pitch: 0, sp: [0, 0, 0], nk: [0, 0, 0], heel: 0 },
+  // ψηλότερα από όσο φτάνουν τα πόδια: η λεκάνη ανεβαίνει και κατεβαίνει μαζί με τις φτέρνες (τεντωμένα γόνατα)
+  base: { y: 1.05 + CALF.h, pitch: 0, sp: [0, 0, 0], nk: [0, 0, 0], heel: 0 },
   keys: {
     setup: { heel: 0 },
     low: { heel: -16 },
@@ -1113,7 +1121,7 @@ def('seated_calf_raise', {
   },
 });
 def('tibialis_raise', {
-  view: { az: 72, el: 10, zoom: 1.1 },
+  view: { az: 64, el: 8, focus: 'shank_L', fb: 0.5 },
   base: { y: 0.84, pitch: -9, sp: [0, 0, 0], nk: [4, 0, 0], toe: 0 },
   keys: {
     setup: { toe: 0 },
