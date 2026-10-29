@@ -36,14 +36,61 @@ function hash(str) {
   return ((h >>> 0) % 1000) / 1000;
 }
 
+// Κίνηση: ο σκελετός (src/rig.js) δίνει έναν μετασχηματισμό ανά κόκαλο ως διπλό τετραδόνιο·
+// κάθε κορυφή αναμειγνύει έως 4 (dual quaternion skinning: χωρίς «ζάρωμα» στις αρθρώσεις).
+export const MAX_BONES = 32;
+const SKIN = {
+  uSkin: { value: 0 },
+  uBR: { value: new Float32Array(MAX_BONES * 4) },
+  uBD: { value: new Float32Array(MAX_BONES * 4) },
+};
 const SHARED = {
   uLevelMask: { value: new THREE.Vector4(1, 0, 0, 0) },
   uClay: { value: CLAY.clone() },
   uTendon: { value: TENDON.clone() },
   uHoverColor: { value: HOVER.clone() },
+  ...SKIN,
 };
 
-const VERT_DECL = /* glsl */ `
+const SKIN_DECL = /* glsl */ `
+attribute vec4 aSkinI;
+attribute vec4 aSkinW;
+uniform float uSkin;
+uniform vec4 uBR[${MAX_BONES}];
+uniform vec4 uBD[${MAX_BONES}];
+void skinDQ(out vec4 br, out vec4 bd) {
+  vec4 r0 = uBR[int(aSkinI.x)];
+  br = r0 * aSkinW.x;
+  bd = uBD[int(aSkinI.x)] * aSkinW.x;
+  vec4 r = uBR[int(aSkinI.y)];
+  float s = dot(r0, r) < 0.0 ? -1.0 : 1.0;
+  br += r * (aSkinW.y * s); bd += uBD[int(aSkinI.y)] * (aSkinW.y * s);
+  r = uBR[int(aSkinI.z)];
+  s = dot(r0, r) < 0.0 ? -1.0 : 1.0;
+  br += r * (aSkinW.z * s); bd += uBD[int(aSkinI.z)] * (aSkinW.z * s);
+  r = uBR[int(aSkinI.w)];
+  s = dot(r0, r) < 0.0 ? -1.0 : 1.0;
+  br += r * (aSkinW.w * s); bd += uBD[int(aSkinI.w)] * (aSkinW.w * s);
+  float l = length(br);
+  br /= l; bd /= l;
+}
+vec3 dqPoint(vec4 r, vec4 d, vec3 p) {
+  return p + 2.0 * cross(r.xyz, cross(r.xyz, p) + r.w * p) + 2.0 * (r.w * d.xyz - d.w * r.xyz + cross(r.xyz, d.xyz));
+}
+vec3 dqDir(vec4 r, vec3 n) { return n + 2.0 * cross(r.xyz, cross(r.xyz, n) + r.w * n); }
+`;
+const SKIN_NORMAL = /* glsl */ `
+vec4 skR = vec4(0.0, 0.0, 0.0, 1.0), skD = vec4(0.0);
+if (uSkin > 0.5) {
+  skinDQ(skR, skD);
+  objectNormal = dqDir(skR, objectNormal);
+}
+`;
+const SKIN_POS = /* glsl */ `
+if (uSkin > 0.5) transformed = dqPoint(skR, skD, transformed);
+`;
+
+const VERT_DECL = SKIN_DECL + /* glsl */ `
 attribute vec4 aAO;
 attribute float aTissue;
 attribute vec4 aFiber;
@@ -220,7 +267,9 @@ function makeMaterial(kind, tint) {
     Object.assign(shader.uniforms, SHARED, u);
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\n${VERT_DECL}`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${VERT_BODY}`);
+      .replace('#include <skinnormal_vertex>', `#include <skinnormal_vertex>\n${SKIN_NORMAL}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${VERT_BODY}`)
+      .replace('#include <skinning_vertex>', `#include <skinning_vertex>\n${SKIN_POS}`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${FRAG_DECL}`)
       .replace('#include <clipping_planes_fragment>', FRAG_FADE)
@@ -234,12 +283,16 @@ function makeMaterial(kind, tint) {
   return mat;
 }
 
-const XRAY_VERT = /* glsl */ `
+const XRAY_VERT = SKIN_DECL + /* glsl */ `
 varying vec3 vN;
 varying vec3 vV;
 void main() {
-  vec4 mv = modelViewMatrix * vec4(position, 1.0);
-  vN = normalize(normalMatrix * normal);
+  vec3 objectNormal = normal;
+  ${SKIN_NORMAL}
+  vec3 transformed = position;
+  ${SKIN_POS}
+  vec4 mv = modelViewMatrix * vec4(transformed, 1.0);
+  vN = normalize(normalMatrix * objectNormal);
   vV = normalize(-mv.xyz);
   gl_Position = projectionMatrix * mv;
 }`;
@@ -256,7 +309,7 @@ void main() {
 
 function makeXrayMaterial() {
   return new THREE.ShaderMaterial({
-    uniforms: { uColor: { value: HI_PRIMARY.clone() }, uAlpha: { value: 0.5 } },
+    uniforms: { uColor: { value: HI_PRIMARY.clone() }, uAlpha: { value: 0.5 }, ...SKIN },
     vertexShader: XRAY_VERT,
     fragmentShader: XRAY_FRAG,
     transparent: true,
@@ -431,6 +484,34 @@ export class Viewer {
   buildTrees() {
     // BVH για γρήγορο picking και για τον υπολογισμό ορατότητας
     for (const m of this.meshes) m.geometry.computeBoundsTree();
+  }
+
+  // ---------------------------------------------------------------- κίνηση (σκελετός)
+  attachRig(rig) {
+    for (const m of this.meshes) {
+      const s = rig.skin.get(m.userData.id);
+      if (!s) continue;
+      m.geometry.setAttribute('aSkinI', new THREE.BufferAttribute(s.si, 4, false));
+      m.geometry.setAttribute('aSkinW', new THREE.BufferAttribute(s.sw, 4, true));
+      // σε κίνηση το σώμα φεύγει από τη θέση ηρεμίας: χωρίς περικοπή με βάση τα όρια ηρεμίας
+      m.frustumCulled = false;
+    }
+    this.rig = rig;
+  }
+
+  // ο σκελετός έχει λυθεί (rig.solve().writeDQ()): το μοντέλο παίρνει τη στάση του
+  showPose(rig) {
+    SKIN.uBR.value.set(rig.dqR);
+    SKIN.uBD.value.set(rig.dqD);
+    SKIN.uSkin.value = 1;
+    this.posed = true;
+    this.dirty = true;
+  }
+
+  restPose() {
+    SKIN.uSkin.value = 0;
+    this.posed = false;
+    this.dirty = true;
   }
 
   // Από ποιες κατευθύνσεις φαίνεται ένα τμήμα (με τις στρώσεις του επιπέδου level): ακτίνες από
@@ -755,7 +836,8 @@ export class Viewer {
   }
 
   pick(e) {
-    if (!this.meshes.length) return null;
+    // σε στάση άσκησης οι θέσεις διαφέρουν από αυτές του BVH: χωρίς επιλογή με κλικ
+    if (!this.meshes.length || this.posed) return null;
     const r = this.renderer.domElement.getBoundingClientRect();
     this.pointer.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     this.raycaster.setFromCamera(this.pointer, this.camera);
