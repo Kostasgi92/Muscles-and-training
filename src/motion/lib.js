@@ -132,8 +132,10 @@ export function stand(B, k, o = {}) {
   // σε κάθε βήμα: πρώτα το ύψος ώστε τα πόδια να φτάνουν (σε έγκυρη στάση), μετά η ισορροπία πάνω σε
   // αυτή τη στάση — έτσι το κέντρο μάζας αλλάζει ομαλά και η λύση δεν «πηδά» από καρέ σε καρέ
   for (let it = 0; it < 8; it++) {
+    // το ύψος ξαναβρίσκεται από την αρχή σε κάθε βήμα (η ισορροπία μπορεί να έφερε τα πόδια πιο κοντά)
+    hy = k.y ?? 0.852;
     let ex = place();
-    for (let j = 0; j < 5 && ex > 2e-6; j++) { hy -= ex + 1e-6; ex = place(); }
+    for (let j = 0; j < 6 && ex > 2e-6; j++) { hy -= ex + 1e-6; ex = place(); }
     if (o.balance === false) break;
     const c = B.com(o.loads ? o.loads(B, k) : []);
     const ez = o.balanceZ === false ? 0 : tgt.z - c.z, exx = o.balanceX ? tgt.x - c.x : 0;

@@ -94,9 +94,13 @@ function navSnapshot() {
 function navPush(key) {
   if (navRestoring) return;
   const s = navSnapshot();
-  if (!s || `${s.m}:${s.k}` === key) return;
-  navStack.push(s);
-  if (navStack.length > 30) navStack.shift();
+  if (s && `${s.m}:${s.k}` === key) return;
+  if (s) {
+    navStack.push(s);
+    if (navStack.length > 30) navStack.shift();
+  }
+  // και το πρώτο βήμα από την αρχική γράφεται στο ιστορικό (όχι η αρχική επαναφορά κατά το άνοιγμα)
+  if (s || state.mode === 'none') histPush();
 }
 function navBack() {
   while (navStack.length) {
@@ -119,6 +123,43 @@ function navBack() {
     }
   }
 }
+// ------------------------------------------------------------------ «Πίσω» του κινητού / browser
+// Κάθε βήμα μέσα στην εφαρμογή (νέα καρτέλα, αξιολόγηση, «Προγράμματα», φόρμα) γράφεται στο ιστορικό,
+// ώστε το «Πίσω» να γυρίζει στο προηγούμενο βήμα· χωρίς προηγούμενο βήμα πάει στην αρχική. Μια «φρουρά»
+// στη βάση του ιστορικού κρατά και το τελευταίο «Πίσω» μέσα στην εφαρμογή, αντί να τη βγάζει έξω.
+const backHooks = [];
+let histArmed = false, histUsed = false;
+function armGuard() {
+  if (histArmed) return;
+  try { history.pushState({ mx: 'guard' }, ''); histArmed = histUsed = true; } catch { /* χωρίς ιστορικό */ }
+}
+function histPush() {
+  armGuard();
+  try { history.pushState({ mx: 'step' }, ''); } catch { /* χωρίς ιστορικό */ }
+}
+// ένα βήμα πίσω: ό,τι είναι ανοιχτό (προτάσεις, φόρμα, «Προγράμματα»), η προηγούμενη καρτέλα, η αρχική
+function appBack() {
+  if (!$('#suggest').hidden) { closeSuggest(); return; }
+  for (const h of backHooks) if (h()) return;
+  if (state.mode === 'review') { leaveReview(); return; }
+  if (navStack.length) { navBack(); return; }
+  if (state.mode !== 'none') window.__mxProgram.empty();
+}
+// το κουμπί «Πίσω» της καρτέλας περνά από το ιστορικό, ώστε να μένει συγχρονισμένο με του κινητού
+function uiBack() {
+  if (history.state && history.state.mx === 'step') history.back();
+  else appBack();
+}
+window.addEventListener('popstate', (e) => {
+  if (!histUsed) return;
+  if (!e.state || !e.state.mx) histArmed = false;   // ξαναγύρισε στη βάση: η φρουρά καταναλώθηκε
+  appBack();
+  armGuard();
+});
+// ο Chrome παραλείπει στο «Πίσω» εγγραφές που μπήκαν χωρίς αλληλεπίδραση: η φρουρά μπαίνει με το πρώτο
+// άγγιγμα ή πλήκτρο (και ξανά, αν χρειαστεί, σε κάθε επόμενο)
+for (const t of ['pointerdown', 'keydown']) window.addEventListener(t, armGuard, { capture: true, passive: true });
+
 function navLabel() {
   const s = navStack[navStack.length - 1];
   if (!s) return '';
@@ -134,7 +175,9 @@ window.__mxProgram = {
   get: () => userProgram.slice(),
   navDepth: () => navStack.length,
   navLabel,
-  back: navBack,
+  back: uiBack,
+  histPush,
+  onBack: (fn) => backHooks.push(fn),
   set(list) {
     userProgram = list.filter((e) => typeof e === 'string' && e.trim());
     store.set('mx.program', userProgram);

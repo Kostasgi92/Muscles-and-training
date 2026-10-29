@@ -96,6 +96,8 @@ var __G=window.__mxG||(s=>s);
   function setView(v, user) {
     const prog = v === 'programs';
     const m = mx();
+    // άνοιγμα των «Προγραμμάτων» = ένα βήμα στο ιστορικό (το «Πίσω» του κινητού γυρίζει στον χάρτη)
+    if (prog && view !== 'programs' && m && m.histPush) m.histPush();
     view = v;
     document.querySelector('.main').hidden = prog;
     $('programsView').hidden = !prog;
@@ -230,6 +232,7 @@ var __G=window.__mxG||(s=>s);
     draft = p
       ? { id: p.id, name: p.name, text: p.exercises.join('\n'), createdAt: p.createdAt, error: '' }
       : { id: null, name: '', text: presetText || '', createdAt: null, error: '' };
+    if (!editingId && mx() && mx().histPush) mx().histPush();
     editingId = p ? p.id : 'new';
     confirmDeleteId = null;
     confirmLoadId = null;
@@ -403,6 +406,14 @@ var __G=window.__mxG||(s=>s);
   });
   // μια αναζήτηση από την κορυφή πρέπει πάντα να οδηγεί στον χάρτη
   $('searchForm').addEventListener('submit', () => setView('map'));
+  // «Πίσω» του κινητού στα «Προγράμματα»: κλείνει φόρμα ή επιβεβαίωση, αλλιώς γυρίζει στον χάρτη
+  if (mx() && mx().onBack) mx().onBack(() => {
+    if (view !== 'programs') return false;
+    if (editingId) closeForm();
+    else if (confirmDeleteId || confirmLoadId) { confirmDeleteId = null; confirmLoadId = null; renderPrograms(); }
+    else setView('map');
+    return true;
+  });
 
   // γραμμή «Πίσω» πάνω από την καρτέλα, όσο υπάρχει προηγούμενη προβολή
   const panel = $('panel');

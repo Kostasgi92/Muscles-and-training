@@ -23,14 +23,24 @@ function barHinge(B, k, ctx, o) {
   // λίγο πίσω από το μέσο, ώστε η λεκάνη να μένει πίσω και οι κνήμες σχεδόν κάθετες
   const tz = k.tz ?? o.tz;
   stand(B, k, {
-    t: ctx.t,
+    t: ctx.t, softLegs: 0.008,
     feet: o.feet,
     target: tz === undefined ? undefined : () => V(0, 0, tz),
     upper: (B, k) => {
       for (const s of SIDES) B.girdle(s, { elev: k.gel ?? 0, prot: k.gpr ?? 0 });
       B.solve();
-      const zb = o.zb ?? (B.pivot('upperarm_L').z + B.pivot('upperarm_R').z) / 2;
-      const reachY = lowReach(B, w, zb, o.flex ?? 3);
+      let zb = o.zb ?? (B.pivot('upperarm_L').z + B.pivot('upperarm_R').z) / 2;
+      let reachY = lowReach(B, w, zb, o.flex ?? 3);
+      // guide: η μπάρα «γλιστρά» πάνω στα πόδια ('touch', RDL) ή δεν περνά μέσα τους ('clear', άρσεις)
+      if (o.guide) {
+        for (let i = 0; i < 2; i++) {
+          const e = B.extreme(['thigh_L', 'thigh_R', 'shank_L', 'shank_R'], (x, y, z) => -z, (x, y) => Math.abs(y - reachY) < 0.025);
+          if (!Number.isFinite(e.v)) break;
+          const front = -e.v + 0.02;
+          zb = o.guide === 'touch' ? front : Math.max(o.zb ?? zb, front);
+          reachY = lowReach(B, w, zb, o.flex ?? 3);
+        }
+      }
       const hold = k.hold ?? 1;
       const held = hold >= 0.999;
       const by = o.floorY !== undefined ? Math.max(o.floorY, reachY) : reachY;
@@ -73,7 +83,7 @@ function solveBarKeys(B, keys, o) {
 
 // ===== Άρση θανάτου (deadlift)
 const DL = { floorY: 0.225, zb: 0.0 };
-DL.o = { w: 0.235, zb: DL.zb, floorY: DL.floorY, kg: 100 };
+DL.o = { w: 0.235, zb: DL.zb, floorY: DL.floorY, kg: 100, guide: 'clear' };
 def('deadlift', {
   view: { az: 68, el: 8 },
   base: { y: 0.85, pitch: 0, sp: [0, 0, 0], nk: [0, 0, 0], stance: 0.26, toe: 8, hold: 0, tz: 0.012 },
@@ -82,7 +92,8 @@ def('deadlift', {
     grip: { y: 0.62, pitch: 74, sp: [10, 0, 0], nk: [-6, 0, 0], hold: 1, by: DL.floorY, tz: -0.025 },
     set: { y: 0.6, pitch: 66, sp: [-3, 0, 0], nk: [-18, 0, 0], hold: 1, by: DL.floorY + 0.004, tz: -0.035 },
     knee: { y: 0.7, pitch: 52, sp: [-3, 0, 0], nk: [-12, 0, 0], hold: 1, by: 0.47, tz: -0.015 },
-    top: { y: 0.85, pitch: -2, sp: [-3, 0, 0], nk: [0, 0, 0], hold: 1, by: 0.779 },
+    // πάνω: όρθιος, τεντωμένα γόνατα — η μπάρα όπου φτάνουν τα χέρια, μπροστά στους μηρούς
+    top: { y: 0.87, pitch: -2, sp: [-3, 0, 0], nk: [0, 0, 0], hold: 1 },
   },
   seq: [['stand', 1.2, 0, { act: 'setup' }], ['grip', 1.8, 1, { act: 'setup' }], ['set', 1.0, 2, { act: 'iso' }], ['knee', 0.8, 3, { act: 'con', via: true }], ['top', 0.8, 3, { act: 'con', hold: 0.5 }],
     ['grip', 1.9, 1, { act: 'ecc' }], ['set', 0.7, 2, { act: 'iso' }], ['knee', 0.8, 3, { act: 'con', via: true }], ['top', 0.8, 3, { act: 'con', hold: 0.5 }]],
@@ -99,22 +110,23 @@ def('deadlift', {
 // ===== Ρουμάνικη άρση (RDL)
 def('rdl', {
   view: { az: 70, el: 8 },
-  base: { y: 0.85, pitch: 0, sp: [-2, 0, 0], nk: [0, 0, 0], stance: 0.24, toe: 6, hold: 1, gpr: 0 },
+  base: { y: 0.85, pitch: 0, sp: [-2, 0, 0], nk: [0, 0, 0], stance: 0.24, toe: 6, hold: 1, gpr: 0, tz: 0.012 },
   keys: {
     stand: { y: 0.852, pitch: 0 },
     soft: { y: 0.836, pitch: 3 },
-    bottom: { y: 0.808, pitch: 76, sp: [0, 0, 0], nk: [-8, 0, 0], gpr: 6 },
+    // κάτω: λεκάνη πίσω (βάρος προς τις φτέρνες), γόνατα μαλακά — όχι κάθισμα
+    bottom: { y: 0.82, pitch: 74, sp: [0, 0, 0], nk: [-8, 0, 0], gpr: 6, tz: 0 },
   },
   seq: [['stand', 1.2, 0, { act: 'setup' }], ['soft', 0.9, 1, { act: 'iso' }], ['bottom', 2.3, 2, { act: 'ecc' }], ['soft', 1.5, 3, { act: 'con', hold: 0.35 }]],
   loop: 2,
   setup(props, env) { env.barObj = props.add('bar', P.barbell({ plates: [0.225] })); },
-  pose(B, k, ctx) { barHinge(B, k, ctx, { w: 0.23, kg: 60 }); },
+  pose(B, k, ctx) { barHinge(B, k, ctx, { w: 0.23, kg: 60, guide: 'touch' }); },
   update: barUpdate,
 });
 
 // ===== Άρση sumo
 const SUMO = {
-  w: 0.165, zb: DL.zb, floorY: DL.floorY, kg: 100,
+  w: 0.165, zb: DL.zb, floorY: DL.floorY, kg: 100, guide: 'clear',
   feet: () => ({ L: { at: V(0.37, FLOOR, 0.0), yaw: 36, pole: V(0.6, 0, 0.8) }, R: { at: V(-0.37, FLOOR, 0.0), yaw: 36, pole: V(-0.6, 0, 0.8) } }),
 };
 def('sumo_deadlift', {
@@ -125,7 +137,7 @@ def('sumo_deadlift', {
     grip: { y: 0.5, pitch: 50, sp: [10, 0, 0], nk: [-6, 0, 0], hold: 1, by: DL.floorY, tz: -0.02 },
     set: { y: 0.49, pitch: 46, sp: [-4, 0, 0], nk: [-14, 0, 0], hold: 1, by: DL.floorY + 0.004, tz: -0.035 },
     knee: { y: 0.66, pitch: 30, sp: [-3, 0, 0], nk: [-8, 0, 0], hold: 1, by: 0.48, tz: -0.015 },
-    top: { y: 0.84, pitch: -2, sp: [-3, 0, 0], hold: 1, by: 0.735 },
+    top: { y: 0.85, pitch: -2, sp: [-3, 0, 0], hold: 1 },
   },
   seq: [['stand', 1.2, 0, { act: 'setup' }], ['grip', 1.8, 1, { act: 'setup' }], ['set', 1.0, 2, { act: 'iso' }], ['knee', 0.8, 3, { act: 'con', via: true }], ['top', 0.8, 3, { act: 'con', hold: 0.5 }],
     ['grip', 1.9, 1, { act: 'ecc' }], ['set', 0.7, 2, { act: 'iso' }], ['knee', 0.8, 3, { act: 'con', via: true }], ['top', 0.8, 3, { act: 'con', hold: 0.5 }]],
