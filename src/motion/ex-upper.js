@@ -433,6 +433,86 @@ def('pec_deck', {
   },
 });
 
+// ===== Pec deck με λυγισμένα χέρια (μαξιλαράκια στους πήχεις)
+// Βραχίονες σχεδόν οριζόντιοι, αγκώνες στις 90°, πήχεις κάθετοι πάνω στα μαξιλαράκια· οι αγκώνες
+// διαγράφουν οριζόντιο τόξο γύρω από τους ώμους (k.h: 0 = στο πλάι, 90 = μπροστά) ενώ οι πήχεις μένουν κάθετοι.
+const PB = { h: 0.47, drop: 8, piv: 1.74 };
+function pecBentArm(B, s, k) {
+  const S = B.pivot('upperarm_' + s);
+  const d = B.side[s];
+  const la = d.a.length();
+  const lf = Math.sqrt(Math.max(0.01, armReach(B, s, 90) ** 2 - la * la));
+  const h = k.h * D2R, dr = PB.drop * D2R;
+  const u = V(sg(s) * Math.cos(h) * Math.cos(dr), -Math.sin(dr), Math.sin(h) * Math.cos(dr));
+  const t = V(-sg(s) * Math.sin(h), 0, Math.cos(h));          // κατεύθυνση της ώθησης (εφαπτομένη του τόξου)
+  const up = V(0, 1, 0);
+  // on < 1: από τα χέρια στους μηρούς (βραχίονες κάτω, πήχεις μπροστά) οι αγκώνες ανεβαίνουν στο πλάι
+  // και οι πήχεις σηκώνονται, χωρίς να τεντώνει ο αγκώνας στη διαδρομή
+  const w = smooth(k.on ?? 1);
+  const ua = V(sg(s) * 0.3, -0.94, 0.16).normalize().lerp(u, w).normalize();
+  const fa = V(sg(s) * 0.05, -0.25, 1).normalize().lerp(up, w).normalize();
+  const E = S.clone().addScaledVector(ua, la);
+  return { S, u: ua, t, E, T: E.clone().addScaledVector(fa, lf), pad: { E: S.clone().addScaledVector(u, la), up } };
+}
+def('pec_deck_bent', {
+  view: { az: 22, el: 24 },
+  base: { pitch: -4, z: 0.08, sp: [-3, 0, 0], nk: [4, 0, 0], h: -10, on: 1, g: [-2, -12] },
+  keys: {
+    setup: { on: 0, g: [0, -4] },
+    set: { on: 1, h: -10, g: [-2, -12] },
+    close: { on: 1, h: 98, g: [-2, 8] },
+  },
+  seq: [['setup', 1.2, 0, { act: 'setup' }], ['set', 1.3, 1, { act: 'iso' }], ['close', 1.3, 2, { act: 'con', hold: 0.4 }], ['set', 2.1, 3, { act: 'ecc', hold: 0.2 }]],
+  loop: 2,
+  setup(props, env) {
+    const g = new THREE.Group();
+    g.add(P.seat({ h: PB.h, z: 0.08, zb: -0.12, back: 4, backH: 0.75 }));
+    g.add(P.box(0.1, PB.piv, 0.1, V(0, PB.piv / 2, -0.3), P.MAT.frame, 0.01));
+    g.add(P.box(0.08, 0.07, 0.3, V(0, PB.piv, -0.17), P.MAT.frame, 0.01));
+    g.add(P.box(0.5, 0.07, 0.08, V(0, PB.piv, -0.04), P.MAT.frame, 0.01));
+    props.add('machine', g);
+    env.levers = SIDES.map((s) => props.add('lv' + s, P.tube(V(), V(0, 1, 0), 0.02)));
+    env.drops = SIDES.map((s) => props.add('dp' + s, P.tube(V(), V(0, 1, 0), 0.02)));
+    env.pads = SIDES.map((s) => props.add('pad' + s, P.box(0.11, 0.3, 0.09, V(), P.MAT.pad, 0.03)));
+  },
+  pose(B, k, ctx) {
+    sit(B, k, {
+      t: ctx.t, h: PB.h,
+      back: { n: V(0, 0.07, 1).normalize(), p: V(0, PB.h + 0.3, -0.16) },
+      limbs: (B, k, ph) => {
+        if (ph === 'pre') { for (const s of SIDES) B.girdle(s, { elev: k.g[0], prot: k.g[1] }); return; }
+        if (ph !== 'post') return;
+        for (const s of SIDES) B.plant(s, V(sg(s) * 0.16, FLOOR, 0.48), { yaw: 8 });
+        B.solve();
+        for (const s of SIDES) {
+          const a = pecBentArm(B, s, k);
+          // παλάμες χαλαρές, προς τα μαξιλαράκια, δάχτυλα προς τα πάνω
+          const w = smooth(k.on);
+          B.reach(s, a.T, { pole: a.u.clone().add(V(0, -0.25, 0)).normalize(), hand: { palm: V(0, -1, 0.1).lerp(a.t, w).normalize(), fingers: V(sg(s) * 0.1, 0, 1).lerp(V(0, 1, 0.05), w).normalize() } });
+          B.fingers(s, lerp(0.15, 0.3, k.on));
+        }
+      },
+    });
+  },
+  update(props, B, k, env) {
+    SIDES.forEach((s, i) => {
+      // το μαξιλαράκι ακολουθεί τη θέση των πήχεων στον πάγκο (k.h), όχι τα χέρια στη στάση αναμονής
+      const a = pecBentArm(B, s, k);
+      const up = a.pad.up;
+      const z = a.t.clone(), x = V().crossVectors(up, z).normalize();
+      const pad = env.pads[i];
+      const c = a.pad.E.clone().addScaledVector(up, 0.17).addScaledVector(a.t, 0.08);
+      pad.position.copy(c);
+      pad.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, up, z));
+      const top = c.clone().addScaledVector(up, 0.15);
+      const piv = V(sg(s) * 0.17, PB.piv, -0.04);
+      const over = top.clone().setY(PB.piv);
+      P.setTube(env.levers[i], piv, over, 0.02);
+      P.setTube(env.drops[i], over, top, 0.02);
+    });
+  },
+});
+
 // ===== Κάμψεις (push-up) και κάμψεις ωμοπλατών
 function pushBody(B, k, env, { scapOnly = false } = {}) {
   const hz = env.hz;
