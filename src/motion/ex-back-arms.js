@@ -757,101 +757,50 @@ def('incline_curl', {
 });
 
 // ===== Κάμψη συγκέντρωσης (concentration curl)
-// Πρώτα το δεξί χέρι, μετά ο αλτήρας περνά στο αριστερό ανάμεσα στα γόνατα και ακολουθεί το αριστερό.
-//  eR/eL: 1 = ο αγκώνας στηριγμένος στον μηρό (σετ), 0 = η παλάμη ακουμπά στο γόνατο
-//  elR/elL: γωνία αγκώνα · qL/qR: το άλλο χέρι πιάνει τον αλτήρα · p: ο αλτήρας από το δεξί (0) στο αριστερό (1)
-def('concentration_curl', {
-  view: { az: 0, el: 16 },
-  base: { pitch: 34, z: 0.0, sp: [8, 0, 0], nk: [12, 0, 0], eR: 1, eL: 0, elR: 8, elL: 8, qL: 0, qR: 0, p: 0 },
-  keys: {
-    setR: {},
-    topR: { elR: 132 },
-    grabL: { qL: 1 },
-    giveL: { qL: 1, p: 1 },
-    takeL: { eL: 1, p: 1 },
-    setL: { eR: 0, eL: 1, p: 1 },
-    topL: { eR: 0, eL: 1, p: 1, elL: 132 },
-    grabR: { eR: 0, eL: 1, p: 1, qR: 1 },
-    giveR: { eR: 0, eL: 1, p: 0, qR: 1 },
-    takeR: { eR: 1, eL: 1, p: 0 },
-  },
-  seq: [
-    ['setR', 1.4, 0, { act: 'setup' }],
-    ['topR', 1.3, 1, { act: 'con', hold: 0.5 }], ['setR', 2.2, 2, { act: 'ecc', hold: 0.25 }],
-    ['topR', 1.3, 1, { act: 'con', hold: 0.5 }], ['setR', 2.2, 2, { act: 'ecc', hold: 0.3 }],
-    ['grabL', 0.9, 3, { act: 'setup' }], ['giveL', 0.6, 3, { act: 'setup' }], ['takeL', 0.9, 3, { act: 'setup' }], ['setL', 0.9, 3, { act: 'setup', hold: 0.3 }],
-    ['topL', 1.3, 1, { act: 'con', hold: 0.5 }], ['setL', 2.2, 2, { act: 'ecc', hold: 0.25 }],
-    ['topL', 1.3, 1, { act: 'con', hold: 0.5 }], ['setL', 2.2, 2, { act: 'ecc', hold: 0.3 }],
-    ['grabR', 0.9, 3, { act: 'setup' }], ['giveR', 0.6, 3, { act: 'setup' }], ['takeR', 0.9, 3, { act: 'setup' }], ['setR', 0.9, 0, { act: 'setup', hold: 0.3 }],
-  ],
-  loop: 1,
-  setup(props, env) {
-    props.add('bench', P.bench({ h: 0.44, z0: 0.2, z1: -0.9 }));
-    env.db = props.add('db', P.dumbbell());
-  },
-  pose(B, k, ctx) {
-    sit(B, k, {
-      t: ctx.t, h: 0.44, seatRegion: (x, y, z) => z < 0.22,
-      limbs: (B, k, ph) => {
-        if (ph !== 'post') return;
-        for (const s of SIDES) B.plant(s, V(sg(s) * 0.3, FLOOR, 0.46), { yaw: 24, pole: V(sg(s) * 0.6, 0, 0.8) });
-        B.solve();
-        for (const s of SIDES) {
-          const e = smooth(clamp(k['e' + s], 0, 1));
-          // σετ: ο αγκώνας ακουμπά στην εσωτερική πλευρά του μηρού της ίδιας πλευράς, κοντά στο γόνατο
-          const elbowAt = B.pt('thigh_' + s, V(sg(s) * 0.03, 0.55, 0.075));
-          const S = B.pivot('upperarm_' + s);
-          const d = dirToArm(B, elbowAt.clone().sub(S), s);
-          B.girdle(s, { prot: lerp(8, 14, e), elev: lerp(0, -4, e) });
-          B.arm(s, { plane: d.plane, elev: d.elev, rot: -22, elbow: k['el' + s], pron: 4 });
-          // ελεύθερο χέρι: η παλάμη στο γόνατο της ίδιας πλευράς
-          // (όχι όσο το ίδιο χέρι κρατά τον αλτήρα στην «παράδοση»: πηγαίνει κατευθείαν στο σετ)
-          const rw = (1 - e) * (1 - smooth(clamp(k['q' + s], 0, 1))) ** 2;
-          if (rw > 0) {
-            const knee = B.pt('thigh_' + s, V(sg(s) * 0.08, 0.5, 0.1)).add(V(0, 0.02, 0));
-            B.reach(s, knee, { at: 'palm', pole: V(sg(s), -0.2, -0.3), hand: { palm: V(0, -1, 0), fingers: V(sg(s) * 0.3, 0, 1) }, blend: rw });
-          }
-          B.fingers(s, lerp(0.25, 1, e));
-        }
-        // το άλλο χέρι πιάνει τον αλτήρα από την άκρη του, ανάμεσα στα γόνατα
-        for (const [s, o] of [['L', 'R'], ['R', 'L']]) {
-          const q = smooth(clamp(k['q' + s], 0, 1));
-          if (q <= 0) continue;
+// Ένα χέρι κάθε φορά: ο αγκώνας στηριγμένος στην εσωτερική πλευρά του μηρού της ίδιας πλευράς,
+// το άλλο χέρι με την παλάμη στο γόνατο. w = το χέρι που δουλεύει.
+function concCurl(id, w) {
+  const f = w === 'L' ? 'R' : 'L';
+  def(id, {
+    view: { az: w === 'L' ? 24 : -24, el: 16 },
+    base: { pitch: 34, z: 0.0, sp: [8, 0, 0], nk: [12, 0, 0], el: 8 },
+    keys: {
+      setup: { el: 8 },
+      top: { el: 132 },
+    },
+    seq: [['setup', 1.2, 0, { act: 'setup' }], ['setup', 0.8, 1, { act: 'setup' }], ['top', 1.3, 2, { act: 'con', hold: 0.5 }], ['setup', 2.2, 3, { act: 'ecc', hold: 0.25 }]],
+    loop: 2,
+    setup(props, env) {
+      props.add('bench', P.bench({ h: 0.44, z0: 0.2, z1: -0.9 }));
+      env.db = props.add('db', P.dumbbell());
+    },
+    pose(B, k, ctx) {
+      sit(B, k, {
+        t: ctx.t, h: 0.44, seatRegion: (x, y, z) => z < 0.22,
+        limbs: (B, k, ph) => {
+          if (ph !== 'post') return;
+          for (const s of SIDES) B.plant(s, V(sg(s) * 0.3, FLOOR, 0.46), { yaw: 24, pole: V(sg(s) * 0.6, 0, 0.8) });
           B.solve();
-          const G = B.grip(o), ax = B.gripAxis(o);
-          if (ax.x * sg(s) < 0) ax.negate();
-          // η παλάμη αγκαλιάζει την κεφαλή του αλτήρα από το πλάι, δάχτυλα μπροστά και κάτω.
-          // Η μετάβαση γίνεται στον χώρο του στόχου (θέση παλάμης, προσανατολισμός, αγκώνας) από την
-          // τρέχουσα στάση του χεριού, όχι με ανάμειξη γωνιών (που «γυρίζει» όταν οι στάσεις απέχουν πολύ)
-          const d = B.side[s], Rh = B.rig.Rw[B.I['hand_' + s]];
-          const P0 = B.palm(s), N0 = d.n0.clone().applyQuaternion(Rh), F0 = d.h0.clone().applyQuaternion(Rh);
-          const Sh = B.pivot('upperarm_' + s), El = B.pivot('forearm_' + s);
-          const pole0 = El.clone().sub(Sh.clone().add(P0).multiplyScalar(0.5)).normalize();
-          const P1 = G.clone().addScaledVector(ax, 0.12), N1 = ax.clone().negate(), F1 = V(0, -0.45, 1).normalize();
-          const pole1 = V(sg(s), -0.3, -0.4).normalize();
-          // προσανατολισμός παλάμης: σφαιρική παρεμβολή ολόκληρου του πλαισίου (όχι γραμμική των διανυσμάτων,
-          // που περνά από το μηδέν όταν οι κατευθύνσεις είναι σχεδόν αντίθετες)
-          const frame = (n, f) => {
-            const fo = f.clone().addScaledVector(n, -f.dot(n)).normalize();
-            return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(n, fo, V().crossVectors(n, fo)));
-          };
-          const Qi = frame(N0, F0).slerp(frame(N1, F1), q);
-          B.reach(s, P0.lerp(P1, q), { at: 'palm', pole: pole0.lerp(pole1, q).normalize(), hand: { palm: V(1, 0, 0).applyQuaternion(Qi), fingers: V(0, 1, 0).applyQuaternion(Qi), pronMin: -85 }, blend: Math.min(1, q * 5) });
-          B.fingers(s, lerp(0.25, 1, Math.min(1, q + smooth(clamp(k['e' + s], 0, 1)))));
-        }
-      },
-    });
-  },
-  update(props, B, k, env) {
-    // ο αλτήρας περνά από το ένα χέρι στο άλλο (μεταφορά στη μέση της «παράδοσης»)
-    const p = smooth(clamp(k.p, 0, 1));
-    const gR = B.grip('R'), gL = B.grip('L');
-    const aR = B.gripAxis('R'), aL = B.gripAxis('L');
-    if (aL.dot(aR) < 0) aL.negate();
-    env.db.position.lerpVectors(gR, gL, p);
-    env.db.quaternion.setFromUnitVectors(X, aR.lerp(aL, p).normalize());
-  },
-});
+          // ο αγκώνας ακουμπά στην εσωτερική πλευρά του μηρού, κοντά στο γόνατο
+          const elbowAt = B.pt('thigh_' + w, V(sg(w) * 0.03, 0.55, 0.075));
+          const S = B.pivot('upperarm_' + w);
+          const d = dirToArm(B, elbowAt.clone().sub(S), w);
+          B.girdle(w, { prot: 14, elev: -4 });
+          B.arm(w, { plane: d.plane, elev: d.elev, rot: -22, elbow: k.el, pron: 4 });
+          B.fingers(w, 1);
+          // το ελεύθερο χέρι: παλάμη στο γόνατο της ίδιας πλευράς
+          const knee = B.pt('thigh_' + f, V(sg(f) * 0.08, 0.5, 0.1)).add(V(0, 0.02, 0));
+          B.girdle(f, { prot: 8 });
+          B.reach(f, knee, { at: 'palm', pole: V(sg(f), -0.2, -0.3), hand: { palm: V(0, -1, 0), fingers: V(sg(f) * 0.3, 0, 1) } });
+          B.fingers(f, 0.25);
+        },
+      });
+    },
+    update(props, B, k, env) { inHand(env.db, B, w); },
+  });
+}
+concCurl('concentration_curl', 'R');
+concCurl('concentration_curl_l', 'L');
 
 // ===== Skull crusher
 def('skull_crusher', {
