@@ -161,9 +161,58 @@ def('decline_bench', {
   update: barUpdate,
 });
 
-// ===== Πιέσεις με αλτήρες σε πάγκο
-// προσανατολισμός του θώρακα ξαπλωμένου ανάσκελα (το μπροστινό του σώματος προς τα πάνω, το κεφάλι προς -z)
-const LIE_INV = new THREE.Quaternion().setFromAxisAngle(X, Math.PI / 2);
+// ===== Πιέσεις με αλτήρες σε πάγκο (επίπεδο ή θετικό)
+// Χέρια για πιέσεις με αλτήρες. Οι θέσεις ορίζονται στο «πλαίσιο αναφοράς» του κορμού πάνω στον πάγκο
+// (κλίση a μοίρες από το οριζόντιο): down = προς τα πόδια κατά μήκος του κορμού, fwd = μπροστά από το στήθος.
+//  k.lb: 0 = αλτήρες στους μηρούς, 1 = στον πάγκο · k.depth: 0 = πάνω (χέρια τεντωμένα), 1 = κάτω (δίπλα στο στήθος)
+// o.zb / o.zt: πόσο προς τα πόδια (από τους ώμους) είναι η κάτω θέση / η κατακόρυφη της πάνω θέσης
+function dbPressArms(B, k, { a = 0, zb = 0.15, zt = 0.075, above = 0.045, kick = 0, tilt = 0.3, pole: pl = V(0.78, -0.48, -0.5) } = {}) {
+  B.solve();
+  const Qref = new THREE.Quaternion().setFromAxisAngle(X, -(90 - a) * D2R);
+  const Qinv = Qref.clone().invert();
+  const down = V(0, -1, 0).applyQuaternion(Qref), fwd = V(0, 0, 1).applyQuaternion(Qref);
+  const Rc = B.rot('chest');
+  for (const s of SIDES) {
+    const onThigh = B.pt('thigh_' + s, V(sg(s) * 0.07, 0.56, 0.11)).add(V(0, 0.07, 0));
+    const S = B.pivot('upperarm_' + s);
+    const xb = sg(s) * k.wd, xt = sg(s) * 0.165;
+    // κάτω θέση: αγκώνες ~55° από τον κορμό, πήχεις κάθετοι, αλτήρες λίγο πάνω από την επιφάνεια του στήθους
+    const at = S.clone().addScaledVector(down, zb);
+    const e = B.extreme(['chest'], (x, y, z) => -(x * fwd.x + y * fwd.y + z * fwd.z), (x, y, z) => {
+      const q = V(x, y, z).sub(S);
+      return Math.abs(x - sg(s) * 0.1) < 0.09 && Math.abs(q.dot(down) - zb) < 0.04;
+    });
+    const surf = e.p ? -e.v : at.dot(fwd) + 0.15;
+    const bottom = at.clone().addScaledVector(fwd, surf + above - at.dot(fwd));
+    bottom.x = xb;
+    // πάνω θέση: κατακόρυφα πάνω από το σημείο zt του στήθους, χέρια σχεδόν τεντωμένα
+    const L = armReach(B, s, 9);
+    const c = S.clone().addScaledVector(down, zt);
+    const yt = S.y + Math.sqrt(Math.max(0.01, L * L - (xt - S.x) ** 2 - (c.z - S.z) ** 2));
+    const top = V(xt, yt, c.z);
+    // τροχιά: οι αλτήρες πλησιάζουν μεταξύ τους κυρίως στο πάνω μισό της πίεσης
+    const d = k.depth, dx = Math.sqrt(Math.max(0, d)) * 0.35 + d * 0.65;
+    const pressed = top.clone().lerp(bottom, d);
+    pressed.x = lerp(xt, xb, dx);
+    // από τους μηρούς στην κάτω θέση: ο αλτήρας μένει μπροστά στο στήθος (κάτω θέση στο πλαίσιο του θώρακα),
+    // ώστε να μην «ανοίγουν» τα χέρια όσο ο κορμός γέρνει πίσω
+    const hold = bottom.clone().sub(S).applyQuaternion(Qinv).applyQuaternion(Rc).add(S)
+      .addScaledVector(fwd, kick * Math.sin(Math.PI * clamp(k.lb, 0, 1)));
+    const T = onThigh.lerp(hold, smooth(clamp(k.lb / 0.55, 0, 1))).lerp(pressed, smooth(clamp((k.lb - 0.55) / 0.45, 0, 1)));
+    // λαβή και αγκώνες στο πλαίσιο του θώρακα (ώστε να μη «γυρίζουν» όσο ο κορμός γέρνει):
+    // ουδέτερη στους μηρούς → σχεδόν πρηνής (οι αντίχειρες λίγο προς το κεφάλι) · αγκώνες προς τα πόδια και προς τον πάγκο
+    const ax = over(s, X).add(V(0, tilt * d, 0)).normalize().lerp(V(0, 0.2, 1), 1 - smooth(k.lb)).normalize().applyQuaternion(Rc);
+    const pole = V(sg(s) * pl.x, pl.y, pl.z).applyQuaternion(Rc).normalize();
+    B.reach(s, T, { pole, hand: { axis: ax, flex: -4 } });
+    B.fingers(s, 1);
+  }
+}
+const dbSetup = (bench) => (props, env) => {
+  props.add('bench', P.bench(bench));
+  env.db = { L: props.add('dbL', P.dumbbell()), R: props.add('dbR', P.dumbbell()) };
+};
+const dbUpdate = (props, B, k, env) => { for (const s of SIDES) inHand(env.db[s], B, s); };
+
 def('db_bench', {
   view: { az: 34, el: 22 },
   base: { pitch: -90, z: 0.13, sp: [-10, 0, 0], nk: [6, 0, 0], lb: 1, depth: 1, wd: 0.37, scap: -12, fz: 0.5 },
@@ -175,10 +224,7 @@ def('db_bench', {
   },
   seq: [['sit', 1.3, 0, { act: 'setup' }], ['lie', 1.6, 0, { act: 'setup', lag: { lb: 0.12 } }], ['top', 1.2, 1, { act: 'con', hold: 0.3 }], ['bottom', 1.9, 2, { act: 'ecc' }], ['top', 1.15, 3, { act: 'con', hold: 0.35 }]],
   loop: 3,
-  setup(props, env) {
-    props.add('bench', P.bench({ h: BENCH.h, z0: BENCH.z0, z1: BENCH.z1 }));
-    env.db = { L: props.add('dbL', P.dumbbell()), R: props.add('dbR', P.dumbbell()) };
-  },
+  setup: dbSetup({ h: BENCH.h, z0: BENCH.z0, z1: BENCH.z1 }),
   pose(B, k, ctx) {
     onSurface(B, k, {
       t: ctx.t, breathe: 0.4,
@@ -187,39 +233,42 @@ def('db_bench', {
         if (ph === 'pre') { for (const s of SIDES) B.girdle(s, { prot: k.scap, elev: -3 }); return; }
         if (ph !== 'post') return;
         benchFeet(B, k.fz, 0.26, 12);
-        B.solve();
-        const Rc = B.rot('chest');
-        const ls = smooth(k.lb);
-        for (const s of SIDES) {
-          // πάνω στον μηρό (καθιστός) → δίπλα στο κάτω στήθος (κάτω θέση) / πάνω από το στήθος (πάνω θέση)
-          const onThigh = B.pt('thigh_' + s, V(sg(s) * 0.07, 0.56, 0.11)).add(V(0, 0.07, 0));
-          const S = B.pivot('upperarm_' + s);
-          // κάτω θέση: αγκώνες ~55° από τον κορμό, πήχεις κάθετοι, αλτήρες στο ύψος του στήθους
-          // πάνω θέση: χέρια σχεδόν τεντωμένα, κάθετα πάνω από τη γραμμή των θηλών, αλτήρες πιο κοντά
-          const zb = S.z + 0.15, zt = S.z + 0.075;
-          const xb = sg(s) * k.wd, xt = sg(s) * 0.165;
-          const yb = (surfaceY(B, ['chest'], sg(s) * 0.1, zb, 0.04) ?? S.y + 0.15) + 0.045;
-          const L = armReach(B, s, 9);
-          const yt = S.y + Math.sqrt(Math.max(0.01, L * L - (xt - S.x) ** 2 - (zt - S.z) ** 2));
-          // τροχιά: οι αλτήρες πλησιάζουν μεταξύ τους κυρίως στο πάνω μισό της πίεσης
-          const d = k.depth, dx = Math.sqrt(Math.max(0, d)) * 0.35 + d * 0.65;
-          const pressed = V(lerp(xt, xb, dx), lerp(yt, yb, d), lerp(zt, zb, d));
-          // ενώ γέρνει πίσω, οι αλτήρες μένουν κολλημένοι μπροστά στο στήθος (η κάτω θέση στο πλαίσιο του θώρακα)
-          const hold = V(xb, yb, zb).sub(S).applyQuaternion(LIE_INV).applyQuaternion(Rc).add(S);
-          const T = onThigh.lerp(hold, smooth(clamp(k.lb / 0.55, 0, 1))).lerp(pressed, smooth(clamp((k.lb - 0.55) / 0.45, 0, 1)));
-          // άξονας λαβής: ουδέτερη στους μηρούς → πρηνής (ελαφρά λοξή στην κάτω θέση) πάνω στον πάγκο
-          const pron = over(s, X).add(V(0, 0, 0.22 * d)).normalize();
-          // (όλα στο πλαίσιο του θώρακα, ώστε να μη «γυρίζουν» όσο ο κορμός γέρνει πίσω)
-          const ax = pron.applyQuaternion(LIE_INV).lerp(V(0, 0.2, 1), 1 - ls).normalize().applyQuaternion(Rc);
-          // αγκώνες προς τα πόδια (όχι ανοιχτοί στις 90°) και κάτω από τους καρπούς
-          const pole = V(sg(s) * 0.78, -0.5, 0.48).applyQuaternion(LIE_INV).applyQuaternion(Rc).normalize();
-          B.reach(s, T, { pole, hand: { axis: ax, flex: -4 } });
-          B.fingers(s, 1);
-        }
+        dbPressArms(B, k);
       },
     });
   },
-  update(props, B, k, env) { for (const s of SIDES) inHand(env.db[s], B, s); },
+  update: dbUpdate,
+});
+
+// θετικός πάγκος: η πλάτη ακουμπά ήδη στον πάγκο· οι αλτήρες ανεβαίνουν από τους μηρούς με ώθηση των γονάτων
+def('db_incline', {
+  view: { az: 40, el: 18 },
+  base: { pitch: -54, z: 0.1, sp: [-8, 0, 0], nk: [8, 0, 0], lb: 1, depth: 1, wd: 0.36, scap: -14, fz: 0.62 },
+  keys: {
+    thighs: { lb: 0, scap: -4, fz: 0.5, nk: [16, 0, 0] },
+    kick: { lb: 1, depth: 1 },
+    top: { depth: 0 },
+    bottom: { depth: 1 },
+  },
+  seq: [['thighs', 1.3, 0, { act: 'setup' }], ['kick', 1.3, 1, { act: 'setup', lag: { fz: 0.3 } }], ['top', 1.2, 2, { act: 'con', hold: 0.3 }], ['bottom', 1.9, 3, { act: 'ecc' }], ['top', 1.15, 2, { act: 'con', hold: 0.35 }]],
+  loop: 3,
+  setup: dbSetup({ h: INC.h, z0: INC.z0, incline: INC.a, seatLen: INC.seat }),
+  pose(B, k, ctx) {
+    onSurface(B, k, {
+      t: ctx.t, breathe: 0.4, iter: 2,
+      contacts: () => [
+        { bones: ['pelvis'], n: Y, d: INC.h, region: (x, y, z) => z > INC.zs - 0.05 },
+        { bones: ['chest', 'girdle_L', 'girdle_R', 'spine2'], n: INC.plane.n, d: INC.plane.d },
+      ],
+      limbs: (B, k, ph) => {
+        if (ph === 'pre') { for (const s of SIDES) B.girdle(s, { prot: k.scap, elev: -2 }); return; }
+        if (ph !== 'post') return;
+        benchFeet(B, k.fz, 0.27, 12);
+        dbPressArms(B, k, { a: INC.a, zb: 0.09, zt: 0.05, kick: 0.05, pole: V(0.7, -0.65, -0.35) });
+      },
+    });
+  },
+  update: dbUpdate,
 });
 
 // ===== Μηχάνημα πιέσεων στήθους

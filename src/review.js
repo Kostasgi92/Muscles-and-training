@@ -210,7 +210,7 @@ export function analyze(programs, exById) {
 // ------------------------------------------------------------------ προτάσεις
 // Ασκήσεις που θα πρότεινε ένας προπονητής για κάθε μυ, με σειρά προτίμησης
 export const PREFERRED = {
-  chest: ['incline_bench', 'bench_press', 'db_bench', 'cable_crossover', 'dips', 'push_up'],
+  chest: ['incline_bench', 'db_incline', 'bench_press', 'db_bench', 'cable_crossover', 'dips', 'push_up'],
   lats: ['lat_pulldown', 'pull_up', 'db_row', 'straight_arm_pulldown', 'chin_up'],
   midback: ['seated_cable_row', 'barbell_row', 'face_pull', 'band_pull_apart', 't_bar_row'],
   traps: ['shrug', 'farmers_walk', 'upright_row'],
@@ -239,7 +239,7 @@ export const PREFERRED = {
 const MOVES = {
   vpull: ['pull_up', 'chin_up', 'lat_pulldown', 'straight_arm_pulldown'],
   hrow: ['barbell_row', 'db_row', 'seated_cable_row', 't_bar_row', 'inverted_row'],
-  upperChest: ['incline_bench'],
+  upperChest: ['incline_bench', 'db_incline'],
   tricepsLong: ['overhead_triceps', 'skull_crusher'],
   kneeFlex: ['lying_leg_curl', 'seated_leg_curl', 'ball_leg_curl', 'nordic_curl'],
   hinge: ['rdl', 'deadlift', 'sumo_deadlift', 'good_morning', 'single_leg_rdl', 'hyperextension', 'kettlebell_swing'],
