@@ -347,7 +347,12 @@
   }
   const uid = () => 'bd' + Math.random().toString(36).slice(2, 7);
   const field = (label, input, hint, cls) => { const id = input.id || (input.id = uid()); return h('div', { class: 'bd-f' + (cls ? ' ' + cls : '') }, h('label', { for: id, text: label }), input, hint ? h('small', { text: hint }) : null); };
-  const numInput = (value, oninput, attrs) => h('input', Object.assign({ type: 'number', inputmode: 'decimal', step: 'any', min: '0', value: value ?? '', oninput: (e) => oninput(e.target.value) }, attrs || {}));
+  // κείμενο με δεκαδικό πληκτρολόγιο: δέχεται και «15,5» και «15.5» (το type=number πετάει το κόμμα → 155)
+  const shown = (v) => (v == null || v === '' ? '' : EL ? String(v).replace('.', ',') : String(v));
+  const numInput = (value, oninput, attrs) => { const a = Object.assign({}, attrs || {}); delete a.step; delete a.min; return h('input', Object.assign({ type: 'text', inputmode: 'decimal', autocomplete: 'off', spellcheck: 'false', value: shown(value), oninput: (e) => oninput(e.target.value) }, a)); };
+  // έλεγχος ενός πεδίου: κενό = εντάξει, αλλιώς αριθμός μέσα στα όρια
+  const badNum = (raw, lo, hi) => String(raw ?? '').trim() !== '' && !(num(raw) >= lo && num(raw) <= hi);
+  const MUS_HINT = T('as your scale shows it: skeletal muscle (~30–45%) or muscle mass (~70–80%)', 'όπως τη δείχνει η ζυγαριά: σκελετικοί μύες (~30–45%) ή μυϊκή μάζα (~70–80%)');
   const card = (label, value, sub, cls) => h('div', { class: 'bd-card' + (cls ? ' ' + cls : '') }, h('span', { class: 'bd-l', text: label }), h('b', { text: value }), sub ? h('small', { text: sub }) : null);
 
   // πρόχειρα που επιβιώνουν από τα re-render της αξιολόγησης
@@ -420,7 +425,12 @@
       if (!isDate(en.date) || en.date > today()) { draft.msg = T('Choose a date that is not in the future.', 'Διάλεξε ημερομηνία που δεν είναι στο μέλλον.'); return rerender(); }
       const c = cleanEntry({ date: en.date, w: en.w, fat: en.fat, mus: en.mus, m: en.m });
       if (!hasData(c)) { draft.msg = T('Fill in at least one value.', 'Συμπλήρωσε τουλάχιστον μία τιμή.'); return rerender(); }
-      if ((c.w && (c.w < 25 || c.w > 300)) || (c.fat && c.fat > 70) || (c.mus && c.mus > 70)) { draft.msg = T('Check the values: weight 25–300 kg, percentages up to 70%.', 'Έλεγξε τις τιμές: βάρος 25–300 kg, ποσοστά έως 70%.'); return rerender(); }
+      const errs = [];
+      if (badNum(en.w, 25, 300)) errs.push(T('weight 25–300 kg', 'βάρος 25–300 kg'));
+      if (badNum(en.fat, 3, 70)) errs.push(T('body fat 3–70%', 'λίπος 3–70%'));
+      if (badNum(en.mus, 10, 90)) errs.push(T('muscle 10–90%', 'μύες 10–90%'));
+      MKEYS.forEach((k) => { if (badNum(en.m[k], 10, 250)) errs.push(MEAS.find((x) => x[0] === k)[1] + ' 10–250 cm'); });
+      if (errs.length) { draft.msg = T('Check: ', 'Έλεγξε: ') + errs.join(', ') + '.'; return rerender(); }
       data.entries.push(c);
       draft.entry = blankEntry(); draft.msg = T('Measurement saved.', 'Η μέτρηση αποθηκεύτηκε.'); draft.showMeas = false;
       persist();
@@ -430,7 +440,7 @@
         field(T('Date', 'Ημερομηνία'), h('input', { type: 'date', value: en.date, max: today(), oninput: (e) => { en.date = e.target.value; } }), null, 'bd-wide'),
         field(T('Weight (kg)', 'Βάρος (kg)'), numInput(en.w, (v) => { en.w = v; }, { step: '0.1' })),
         field(T('Body fat (%)', 'Λίπος (%)'), numInput(en.fat, (v) => { en.fat = v; }, { step: '0.1' })),
-        field(T('Muscle (%)', 'Μύες (%)'), numInput(en.mus, (v) => { en.mus = v; }, { step: '0.1' }), T('skeletal muscle, from your scale', 'σκελετικοί μύες, από τη ζυγαριά'))),
+        field(T('Muscle (%)', 'Μύες (%)'), numInput(en.mus, (v) => { en.mus = v; }, { step: '0.1' }), MUS_HINT)),
       measBox,
       h('button', { class: 'btn primary', type: 'submit', text: T('Save measurement', 'Αποθήκευση μέτρησης') }),
       draft.msg ? h('p', { class: 'bd-msg', role: 'status', text: draft.msg }) : null,
@@ -461,23 +471,26 @@
     const g = draft.goals || (draft.goals = { w: data.goals.w ?? '', fat: data.goals.fat ?? '', mus: data.goals.mus ?? '', fatKg: '', musKg: '', date: data.goals.date ?? '' });
     const syncKg = () => {
       const w = num(g.w);
-      if (w && num(g.fat)) g.fatKg = String(Math.round(w * num(g.fat)) / 100);
-      if (w && num(g.mus)) g.musKg = String(Math.round(w * num(g.mus)) / 100);
+      if (w && num(g.fat)) g.fatKg = shown(Math.round(w * num(g.fat)) / 100);
+      if (w && num(g.mus)) g.musKg = shown(Math.round(w * num(g.mus)) / 100);
     };
     if (g.fatKg === '' && g.musKg === '') syncKg();
     const inputs = {};
     const upd = () => { ['fatKg', 'musKg', 'fat', 'mus'].forEach((k) => { if (inputs[k] && document.activeElement !== inputs[k]) inputs[k].value = g[k]; }); };
     inputs.w = numInput(g.w, (v) => { g.w = v; syncKg(); upd(); }, { step: '0.1' });
     inputs.fat = numInput(g.fat, (v) => { g.fat = v; syncKg(); upd(); }, { step: '0.1' });
-    inputs.fatKg = numInput(g.fatKg, (v) => { g.fatKg = v; const w = num(g.w); if (w && num(v)) g.fat = String(Math.round((1000 * num(v)) / w) / 10); upd(); }, { step: '0.1' });
+    inputs.fatKg = numInput(g.fatKg, (v) => { g.fatKg = v; const w = num(g.w); if (w && num(v)) g.fat = shown(Math.round((1000 * num(v)) / w) / 10); upd(); }, { step: '0.1' });
     inputs.mus = numInput(g.mus, (v) => { g.mus = v; syncKg(); upd(); }, { step: '0.1' });
-    inputs.musKg = numInput(g.musKg, (v) => { g.musKg = v; const w = num(g.w); if (w && num(v)) g.mus = String(Math.round((1000 * num(v)) / w) / 10); upd(); }, { step: '0.1' });
+    inputs.musKg = numInput(g.musKg, (v) => { g.musKg = v; const w = num(g.w); if (w && num(v)) g.mus = shown(Math.round((1000 * num(v)) / w) / 10); upd(); }, { step: '0.1' });
     const now = (v, u) => (v != null ? T('now ', 'τώρα ') + nf(v) + u : null);
     const form = h('form', { class: 'bd-box', novalidate: true, onsubmit: (e) => {
       e.preventDefault();
       const w = num(g.w), fat = num(g.fat), mus = num(g.mus);
-      if ((g.w !== '' && !w) || (w && (w < 25 || w > 300))) { draft.gmsg = T('Target weight: 25–300 kg.', 'Βάρος-στόχος: 25–300 kg.'); return rerender(); }
-      if ((fat && fat > 60) || (mus && mus > 70)) { draft.gmsg = T('Check the percentages.', 'Έλεγξε τα ποσοστά.'); return rerender(); }
+      const errs = [];
+      if (badNum(g.w, 25, 300)) errs.push(T('target weight 25–300 kg', 'βάρος-στόχος 25–300 kg'));
+      if (badNum(g.fat, 3, 70)) errs.push(T('body fat 3–70%', 'λίπος 3–70%'));
+      if (badNum(g.mus, 10, 90)) errs.push(T('muscle 10–90%', 'μύες 10–90%'));
+      if (errs.length) { draft.gmsg = T('Check: ', 'Έλεγξε: ') + errs.join(', ') + '.'; return rerender(); }
       if (g.date && (!isDate(g.date) || g.date <= today())) { draft.gmsg = T('The target date must be in the future.', 'Η ημερομηνία-στόχος πρέπει να είναι στο μέλλον.'); return rerender(); }
       data.goals = { w, fat, mus, date: g.date || null, setOn: today() };
       draft.goals = null; draft.gmsg = T('Goals saved.', 'Οι στόχοι αποθηκεύτηκαν.');
@@ -488,7 +501,7 @@
         field(T('Target weight (kg)', 'Βάρος-στόχος (kg)'), inputs.w, now(mt.W && mt.W.v, ' kg'), 'bd-wide'),
         field(T('Body fat (%)', 'Λίπος (%)'), inputs.fat, now(mt.fat, '%')),
         field(T('Body fat (kg)', 'Λίπος (kg)'), inputs.fatKg, now(mt.fatKg, ' kg')),
-        field(T('Muscle (%)', 'Μύες (%)'), inputs.mus, now(mt.M && mt.M.v, '%')),
+        field(T('Muscle (%)', 'Μύες (%)'), inputs.mus, [now(mt.M && mt.M.v, '%'), MUS_HINT].filter(Boolean).join(' · ')),
         field(T('Muscle (kg)', 'Μύες (kg)'), inputs.musKg, now(mt.musKg, ' kg')),
         field(T('By (optional)', 'Έως (προαιρετικά)'), h('input', { type: 'date', value: g.date, min: today(), oninput: (e) => { g.date = e.target.value; } }), null, 'bd-wide')),
       h('button', { class: 'btn primary', type: 'submit', text: T('Save goals', 'Αποθήκευση στόχων') }),

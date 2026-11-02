@@ -329,7 +329,7 @@
         if (mode === 'time') return h('div', { class: 'pg-set one' }, n, inp(r, i, 'sec', { min: '1', step: '1', inputmode: 'numeric' }, T(`Set ${i + 1} seconds`, `Σετ ${i + 1} δευτερόλεπτα`)), h('span', { class: 'pg-x', text: T('seconds', 'δευτ.') }));
         const repIn = inp(r, i, 'reps', { min: '1', step: '1', inputmode: 'numeric' }, T(`Set ${i + 1} reps`, `Σετ ${i + 1} επαναλήψεις`));
         if (!showKg) return h('div', { class: 'pg-set one' }, n, repIn, h('span', { class: 'pg-x', text: T('reps', 'επ.') }));
-        return h('div', { class: 'pg-set' }, n, inp(r, i, 'kg', { min: '0', step: '0.25', inputmode: 'decimal' }, T(`Set ${i + 1} weight (kg)`, `Σετ ${i + 1} βάρος (kg)`)), h('span', { class: 'pg-x', text: 'kg ×' }), repIn, h('span', { class: 'pg-x', text: T('reps', 'επ.') }));
+        return h('div', { class: 'pg-set' }, n, inp(r, i, 'kg', { type: 'text', inputmode: 'decimal', autocomplete: 'off' }, T(`Set ${i + 1} weight (kg)`, `Σετ ${i + 1} βάρος (kg)`)), h('span', { class: 'pg-x', text: 'kg ×' }), repIn, h('span', { class: 'pg-x', text: T('reps', 'επ.') }));
       });
       // τα σετ που δεν άγγιξες ακολουθούν το 1ο σετ
       function mirror(field) {
