@@ -10,6 +10,7 @@ var __G=window.__mxG||(s=>s);
 
   const $ = (id) => document.getElementById(id);
   const mx = () => window.__mxProgram || null;
+  const T = (en, el) => (window.__mxLang === 'en' ? en : el);
 
   // μικρό DOM helper: όλο το κείμενο του χρήστη μπαίνει με textContent, ποτέ με innerHTML
   function h(tag, props, ...kids) {
@@ -228,10 +229,22 @@ var __G=window.__mxG||(s=>s);
   }
 
   /* ---------------------------------------------------------- φόρμα */
-  function openForm(p, presetText) {
+  // o: { name, append: [{name, sets}], sets: {όνομα: σετ}, plan, returnTo: 'review', note }
+  function openForm(p, presetText, o) {
+    o = o || {};
     draft = p
       ? { id: p.id, name: p.name, text: p.exercises.join('\n'), createdAt: p.createdAt, error: '' }
-      : { id: null, name: '', text: presetText || '', createdAt: null, error: '' };
+      : { id: null, name: o.name || '', text: presetText || '', createdAt: null, error: '' };
+    draft.setsHint = Object.assign({}, o.sets || {});
+    draft.planHint = o.plan || null;
+    draft.returnTo = o.returnTo || null;
+    draft.note = o.note || '';
+    (o.append || []).forEach((a) => {
+      const lines = draft.text.split('\n').map((x) => x.trim()).filter(Boolean);
+      if (!lines.includes(a.name)) lines.push(a.name);
+      draft.text = lines.join('\n');
+      if (a.sets) draft.setsHint[a.name] = a.sets;
+    });
     if (!editingId && mx() && mx().histPush) mx().histPush();
     editingId = p ? p.id : 'new';
     confirmDeleteId = null;
@@ -242,9 +255,29 @@ var __G=window.__mxG||(s=>s);
   }
 
   function closeForm() {
+    const back = draft && draft.returnTo;
     draft = null; editingId = null; saving = false;
     renderPrograms();
+    if (back === 'review') { setView('review'); return; }
     $('pvNew').focus();
+  }
+
+  // σετ ανά άσκηση για τη νέα λίστα: ίδιο όνομα → ίδια άσκηση με άλλο όνομα (μετονομασία) → υπόδειξη → 3
+  function planFor(exercises, prevPlan, hint, planHint) {
+    const m = mx();
+    const idOf = (n) => { const hit = m && m.find ? m.find(n) : null; return hit ? hit.id : null; };
+    const old = (prevPlan && Array.isArray(prevPlan.sets) ? prevPlan.sets : []).filter((x) => x && typeof x.name === 'string');
+    const base = Object.assign({}, prevPlan || {}, planHint || {});
+    const loose = (n) => (m && m.findLoose ? m.findLoose(n) : null);
+    const sets = [...new Set(exercises)].map((name) => {
+      if (hint && hint[name]) return { name, n: hint[name] };
+      const same = old.find((x) => x.name === name);
+      if (same) return { name, n: same.n };
+      const id = idOf(name) || loose(name);
+      const moved = id ? (old.find((x) => idOf(x.name) === id) || old.find((x) => !exercises.includes(x.name) && loose(x.name) === id)) : null;
+      return { name, n: moved ? moved.n : 3 };
+    });
+    return { perWeek: base.perWeek || 1, inWeek: base.inWeek !== false, sets };
   }
 
   async function submitForm() {
@@ -256,7 +289,8 @@ var __G=window.__mxG||(s=>s);
     saving = true; draft.error = ''; renderPrograms();
     try {
       const prev = draft.id ? programs.find((q) => q.id === draft.id) : null;
-      await queued(draft.id || 'new', () => store.save({ id: draft.id, name, exercises, createdAt: draft.createdAt, plan: prev && prev.plan }));
+      const plan = planFor(exercises, prev && prev.plan, draft.setsHint, draft.planHint);
+      await queued(draft.id || 'new', () => store.save({ id: draft.id, name, exercises, createdAt: draft.createdAt, plan }));
       const wasNew = !draft.id;
       if (!wasNew && draft.id === progId && mx()) {
         progName = name; lsSet('mx.progName', progName);
@@ -308,6 +342,7 @@ var __G=window.__mxG||(s=>s);
       class: 'pcard pform',
       onkeydown: (e) => { if (e.key === 'Escape' && !saving) { e.stopPropagation(); closeForm(); } },
     },
+      draft.note ? h('p', { class: 'pform-note', role: 'status', text: draft.note }) : null,
       h('div', { class: 'field' }, h('label', { for: 'pfName', text: (__G("\u038c\u03bd\u03bf\u03bc\u03b1 \u03c0\u03c1\u03bf\u03b3\u03c1\u03ac\u03bc\u03bc\u03b1\u03c4\u03bf\u03c2")) }), nameInput),
       h('div', { class: 'field' },
         h('label', { for: 'pfEx', text: (__G("\u0391\u03c3\u03ba\u03ae\u03c3\u03b5\u03b9\u03c2")) }), area,
@@ -461,9 +496,43 @@ var __G=window.__mxG||(s=>s);
       if (!store) return Promise.reject(new Error('not ready'));
       return queued('new', () => store.save({ name: String(p.name || '').trim().slice(0, 60) || '—', exercises: cleanNames(p.exercises), plan: p.plan }));
     },
-    openNew(text) { setView('programs'); openForm(null, text || ''); },
-    openEdit(id) { const p = programs.find((q) => q.id === id); if (p) { setView('programs'); openForm(p); } },
+    openNew(text, o) { setView('programs'); openForm(null, text || '', o); },
+    openEdit(id, o) { const p = programs.find((q) => q.id === id); if (p) { setView('programs'); openForm(p, '', o); } },
+    view: () => view,
+    show() { setView('programs'); },
   };
+
+  // πρότυπα προπονητή: εδώ, στην ενότητα «Προγράμματα», που είναι η μόνη που προσθέτει ή αφαιρεί ασκήσεις
+  (function templatePicker() {
+    const m = mx();
+    const tp = m && m.templates ? m.templates() : null;
+    const box = document.querySelector('#programsView .pv-actions');
+    if (!tp || !box) return;
+    const sel = h('select', { id: 'pvTemplate', class: 'pv-template', 'aria-label': T('Add a coach template', 'Πρόσθεσε πρότυπο προπονητή') },
+      h('option', { value: '', text: T('Add a coach template…', 'Πρόσθεσε πρότυπο προπονητή…') }),
+      h('optgroup', { label: T('A complete week', 'Ολόκληρη εβδομάδα') }, tp.packs.map((k) => h('option', { value: 'pack:' + k.id, text: k.name + ' · ' + k.note }))),
+      h('optgroup', { label: T('One program', 'Ένα πρόγραμμα') }, tp.list.map((t) => h('option', { value: t.id, text: t.name + ' · ' + t.perWeek + T('× / week', '× / εβδ.') }))));
+    sel.addEventListener('change', async () => {
+      const v = sel.value;
+      sel.value = '';
+      if (!v || !store) return;
+      if (v.startsWith('pack:')) {
+        sel.disabled = true;
+        try {
+          const made = await m.addTemplates(tp.packs.find((k) => 'pack:' + k.id === v).ids);
+          setStatus(T('Added: ', 'Προστέθηκαν: ') + made.map((x) => x.name).join(', '));
+        } catch (e) { setStatus(T('The template could not be added. Try again.', 'Το πρότυπο δεν προστέθηκε. Δοκίμασε ξανά.')); }
+        sel.disabled = false;
+        return;
+      }
+      const t = tp.list.find((x) => x.id === v);
+      if (!t) return;
+      const sets = {};
+      t.items.forEach((it) => { sets[it.name] = it.sets; });
+      openForm(null, t.items.map((it) => it.name).join('\n'), { name: t.name, sets, plan: { perWeek: t.perWeek, inWeek: true } });
+    });
+    box.insertBefore(sel, box.firstChild);
+  })();
 
   const chipsEl = $('chips');
   if (chipsEl && window.MutationObserver) new MutationObserver(applyNav).observe(chipsEl, { childList: true });

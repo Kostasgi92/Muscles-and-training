@@ -199,6 +199,14 @@ window.__mxProgram = {
     renderChips();
   },
   find: (t) => { try { return resolveExercise(t); } catch { return null; } },
+  findLoose: (t) => { try { return looseId(t); } catch { return null; } },
+  // τα προγράμματα όπως τα βλέπει η αξιολόγηση (μαζί με αλλαγές σετ που δεν γράφτηκαν ακόμα)
+  programs: () => reviewPrograms(),
+  templates: () => ({
+    packs: PACKS.map((k) => ({ id: k.id, name: k.name, note: k.note, ids: TEMPLATES.filter((x) => x.pack === k.id).map((x) => x.id) })),
+    list: TEMPLATES.map((t) => ({ id: t.id, name: t.name, perWeek: t.perWeek, items: t.items.filter((it) => exById.has(it.ex)).map((it) => ({ name: exById.get(it.ex).el, sets: it.sets })) })),
+  }),
+  addTemplates: (ids) => addTemplates(ids),
   // αξιολόγηση
   mode: () => state.mode,
   review: () => showReview(),
@@ -671,7 +679,21 @@ function planOf(p) {
     sets: (Array.isArray(pl.sets) ? pl.sets : []).filter((x) => x && typeof x.name === 'string').map((x) => ({ name: x.name, n: clampInt(x.n, 1, 20, 3) })),
   };
 }
-const setsOf = (plan, name) => plan.sets.find((x) => x.name === name)?.n ?? 3;
+// σετ μιας άσκησης: ίδιο όνομα, αλλιώς ίδια άσκηση με άλλο όνομα (μετονομασία στα «Προγράμματα»), αλλιώς 3.
+// Για μετονομασία μετράνε και τα «ορφανά» σετ (όνομα που δεν υπάρχει πια στη λίστα) με χαλαρότερο ταίριασμα.
+function looseId(text) {
+  const r = index.search(text, 3).filter((x) => x.type === 'exercise');
+  return r[0] && r[0].score >= 0.5 ? r[0].id : null;
+}
+function setsOf(plan, name, names = null) {
+  const same = plan.sets.find((x) => x.name === name);
+  if (same) return same.n;
+  const id = resolveName(name)?.id ?? looseId(name);
+  if (!id) return 3;
+  const moved = plan.sets.find((x) => resolveName(x.name)?.id === id)
+    ?? (names ? plan.sets.find((x) => !names.includes(x.name) && looseId(x.name) === id) : null);
+  return moved ? moved.n : 3;
+}
 
 // τα αποθηκευμένα προγράμματα όπως τα θέλει το analyze(), μαζί με τις αλλαγές που δεν γράφτηκαν ακόμα
 function reviewPrograms() {
@@ -683,7 +705,7 @@ function reviewPrograms() {
     const names = (Array.isArray(p.exercises) ? p.exercises : []).filter((x) => typeof x === 'string' && x.trim());
     return {
       id: p.id, name: String(p.name ?? ''), perWeek: plan.perWeek, active: plan.inWeek, plan, names,
-      items: names.map((name, i) => ({ i, name, ex: resolveName(name)?.id ?? null, sets: setsOf(plan, name) })),
+      items: names.map((name, i) => ({ i, name, ex: resolveName(name)?.id ?? null, sets: setsOf(plan, name, names) })),
     };
   });
 }
@@ -696,7 +718,7 @@ function changeProgram(id, fn) {
   const names = next.names ?? p.names;
   const plan = next.plan ?? p.plan;
   // στο plan μένουν τα σετ κάθε άσκησης που υπάρχει στη λίστα, ρητά
-  plan.sets = [...new Set(names)].map((name) => ({ name, n: setsOf(plan, name) }));
+  plan.sets = [...new Set(names)].map((name) => ({ name, n: setsOf(plan, name, names) }));
   pend.set(id, { ...pend.get(id), plan, ...(next.names ? { exercises: names } : {}) });
   clearTimeout(pendTimers.get(id));
   pendTimers.set(id, setTimeout(() => flushProgram(id), 700));
@@ -724,24 +746,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 // τα προγράμματα άλλαξαν (εδώ, στην ενότητα «Προγράμματα» ή σε άλλη συσκευή)
 function onPrograms() {
   if (state.mode === 'review') renderReview({ ifChanged: true });
-}
-
-function addExerciseTo(pid, exId, sets = 3) {
-  const ex = exById.get(exId);
-  if (!ex) return null;
-  return changeProgram(pid, ({ names, plan }) => {
-    const have = names.find((n) => resolveName(n)?.id === exId);
-    if (have) {
-      const cur = plan.sets.find((x) => x.name === have);
-      if (cur) cur.n = Math.min(20, cur.n + sets);
-      else plan.sets.push({ name: have, n: Math.min(20, 3 + sets) });
-    } else {
-      names.push(ex.el);
-      plan.sets = plan.sets.filter((x) => x.name !== ex.el);
-      plan.sets.push({ name: ex.el, n: sets });
-    }
-    return { names, plan };
-  });
+  window.__mxProg?.refreshCards?.();
 }
 
 async function addTemplates(ids) {
@@ -804,6 +809,21 @@ function muscleStatus(m) {
   return out.join(' ');
 }
 
+// ανάλυση του βαθμού ενός μυός ανά καρτέλα της αξιολόγησης
+function muscleParts(m, result) {
+  if (m.V <= 0) return '';
+  const g = result.goal;
+  const rows = [];
+  rows.push([T('Sets & times a week', 'Σετ & φορές την εβδομάδα'), T('Programs', 'Προγράμματα'), nf(m.base) + '/10',
+    g && m.min !== m.baseMin ? T(`target ${m.min}+ sets for ${g.label.toLowerCase()}`, `στόχος ${m.min}+ σετ για ${g.label.toLowerCase()}`) : T(`target ${m.min}+ sets`, `στόχος ${m.min}+ σετ`)]);
+  if (m.prog != null) rows.push([T('Load progression', 'Πρόοδος φορτίου'), T('Progress', 'Πρόοδος'), nf(m.prog) + '/10',
+    T(`${m.logged} of ${m.contrib.length} exercises logged`, `${m.logged} από ${m.contrib.length} ασκήσεις καταγεγραμμένες`)]);
+  if (m.trend) rows.push([m.trend.name, T('Body', 'Σώμα'), (m.trend.delta >= 0 ? '+' : '−') + window.__mxBody.fmtCm(Math.abs(m.trend.delta)) + ' cm',
+    T(`in ${m.trend.weeks} weeks`, `σε ${m.trend.weeks} εβδομάδες`) + (m.trendPenalty ? T(' · not growing: −0.5', ' · δεν μεγαλώνει: −0,5') : '')]);
+  const formula = m.prog != null ? T(`Score = 85% sets & frequency + 15% progression${m.trendPenalty ? ' − 0.5' : ''} = ${nf(m.score)}`, `Βαθμός = 85% σετ & συχνότητα + 15% πρόοδος${m.trendPenalty ? ' − 0,5' : ''} = ${nf(m.score)}`) : '';
+  return `<ul class="rv-mparts">${rows.map(([a, tab, v, note]) => `<li><span>${esc(a)} <small>· ${esc(tab)}</small></span><b>${esc(v)}</b><small>${esc(note)}</small></li>`).join('')}</ul>${formula ? `<p class="rv-mformula">${esc(formula)}</p>` : ''}`;
+}
+
 function vbar(m) {
   const S = 30;
   const pct = (x) => `${(Math.min(S, Math.max(0, x)) / S) * 100}%`;
@@ -826,6 +846,7 @@ function mapProgramUnsaved(progs) {
 }
 
 function tabPrograms(progs) {
+  const canAsk = !state.claudeOff;
   const cards = progs.map((p) => {
     const open = rv.open.has(p.id);
     const known = p.items.filter((it) => it.ex);
@@ -837,16 +858,15 @@ function tabPrograms(progs) {
       return ex ? `<li>
           <span class="rv-iname">${esc(nm)}${ex.ai ? ' <small>Claude</small>' : ''}</span>
           <span class="rv-stepper"><button type="button" data-dec="${it.i}" data-key="dec:${esc(p.id)}:${it.i}" aria-label="${esc(T(`Fewer sets of ${nm}`, `Λιγότερα σετ για ${nm}`))}">−</button><output aria-live="polite">${it.sets} <small>${setsWord(it.sets)}</small></output><button type="button" data-inc="${it.i}" data-key="inc:${esc(p.id)}:${it.i}" aria-label="${esc(T(`More sets of ${nm}`, `Περισσότερα σετ για ${nm}`))}">+</button></span>
-          <button type="button" class="rv-x" data-rm="${it.i}" aria-label="${esc(T(`Remove ${nm}`, `Αφαίρεση ${nm}`))}">×</button>
         </li>`
         : `<li class="rv-unknown">
-          <span class="rv-iname">${esc(nm)} <small>${T('not recognised, not counted', 'δεν αναγνωρίστηκε, δεν μετράει')}</small></span>
-          <span></span>
-          <button type="button" class="rv-x" data-rm="${it.i}" aria-label="${esc(T(`Remove ${nm}`, `Αφαίρεση ${nm}`))}">×</button>
+          <span class="rv-iname">${esc(nm)} <small>${T('not recognised, not scored', 'δεν αναγνωρίστηκε, δεν βαθμολογείται')}</small></span>
+          <span class="rv-stepper"><button type="button" data-dec="${it.i}" data-key="dec:${esc(p.id)}:${it.i}" aria-label="${esc(T(`Fewer sets of ${nm}`, `Λιγότερα σετ για ${nm}`))}">−</button><output aria-live="polite">${it.sets} <small>${setsWord(it.sets)}</small></output><button type="button" data-inc="${it.i}" data-key="inc:${esc(p.id)}:${it.i}" aria-label="${esc(T(`More sets of ${nm}`, `Περισσότερα σετ για ${nm}`))}">+</button></span>
+          ${canAsk ? `<button type="button" class="rv-link rv-recog" data-recog="${it.i}" data-key="recog:${esc(p.id)}:${it.i}">${T('Recognise with Claude', 'Αναγνώριση με το Claude')}</button>` : ''}
         </li>`;
     }).join('');
     const meta = [
-      T(`${known.length} ${known.length === 1 ? 'exercise' : 'exercises'}`, `${known.length} ${known.length === 1 ? 'άσκηση' : 'ασκήσεις'}`),
+      T(`${p.items.length} ${p.items.length === 1 ? 'exercise' : 'exercises'}`, `${p.items.length} ${p.items.length === 1 ? 'άσκηση' : 'ασκήσεις'}`),
       T(`${perSession} sets per session`, `${perSession} σετ ανά προπόνηση`),
       p.active ? T(`${perSession * p.perWeek} sets a week`, `${perSession * p.perWeek} σετ την εβδομάδα`) : T('not in the week', 'εκτός εβδομάδας'),
       unknown ? T(`${unknown} not recognised`, `${unknown} δεν ${unknown === 1 ? 'αναγνωρίστηκε' : 'αναγνωρίστηκαν'}`) : '',
@@ -856,39 +876,28 @@ function tabPrograms(progs) {
         <input type="checkbox" id="rvon-${esc(p.id)}" data-on data-key="on:${esc(p.id)}" ${p.active ? 'checked' : ''}>
         <label for="rvon-${esc(p.id)}" class="rv-pname">${esc(p.name)}</label>
         <select data-week data-key="week:${esc(p.id)}" aria-label="${esc(T(`Times a week for ${p.name}`, `Φορές την εβδομάδα για ${p.name}`))}">${[1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}"${n === p.perWeek ? ' selected' : ''}>${perWeekLabel(n)}</option>`).join('')}</select>
-        <button type="button" class="rv-icon" data-toggle data-key="tog:${esc(p.id)}" aria-expanded="${open}" aria-label="${esc(open ? T(`Close ${p.name}`, `Κλείσιμο ${p.name}`) : T(`Edit sets of ${p.name}`, `Σετ και ασκήσεις του ${p.name}`))}">${open ? '▴' : '▾'}</button>
+        <button type="button" class="rv-icon" data-toggle data-key="tog:${esc(p.id)}" aria-expanded="${open}" aria-label="${esc(open ? T(`Close ${p.name}`, `Κλείσιμο ${p.name}`) : T(`Sets of ${p.name}`, `Σετ του ${p.name}`))}">${open ? '▴' : '▾'}</button>
       </div>
       <p class="rv-pmeta">${meta}</p>
       ${open ? `<div class="rv-pbody">
         ${p.items.length ? `<ul class="rv-items">${items}</ul>` : `<p class="sub">${T('No exercises yet.', 'Δεν έχει ασκήσεις ακόμα.')}</p>`}
-        <form class="rv-additem" data-add>
-          <input list="rvExList" data-key="add:${esc(p.id)}" placeholder="${esc(T('Add an exercise…', 'Πρόσθεσε άσκηση…'))}" aria-label="${esc(T(`New exercise in ${p.name}`, `Νέα άσκηση στο ${p.name}`))}" enterkeyhint="done" autocomplete="off">
-          <button type="submit" class="btn" aria-label="${esc(T('Add', 'Προσθήκη'))}">＋</button>
-        </form>
-        <div class="rv-addmsg" role="status"></div>
-        <button type="button" class="rv-link" data-edit>${T('Rename it or edit the list in My programs', 'Μετονομασία ή αλλαγή της λίστας στα «Προγράμματα»')}</button>
+        <button type="button" class="rv-link" data-edit>${T('Add, remove or rename exercises in the Programs section', 'Πρόσθεσε, αφαίρεσε ή μετονόμασε ασκήσεις στην ενότητα «Προγράμματα»')}</button>
       </div>` : ''}
     </section>`;
   }).join('');
-  const tplSelect = `<select data-template data-key="template" aria-label="${esc(T('Add a coach template', 'Πρόσθεσε πρότυπο προπονητή'))}">
-      <option value="">${T('Add a coach template…', 'Πρόσθεσε πρότυπο προπονητή…')}</option>
-      <optgroup label="${esc(T('A complete week', 'Ολόκληρη εβδομάδα'))}">${PACKS.map((k) => `<option value="pack:${k.id}">${esc(k.name)} · ${esc(k.note)}</option>`).join('')}</optgroup>
-      <optgroup label="${esc(T('One program', 'Ένα πρόγραμμα'))}">${TEMPLATES.map((t) => `<option value="${t.id}">${esc(t.name)} · ${perWeekLabel(t.perWeek)}</option>`).join('')}</optgroup>
-    </select>`;
   return `
-    <p class="sub">${T('Tick the programs you do in your week and how many times you do each. The scores and the colours on the body update straight away.', 'Τσέκαρε τα προγράμματα που κάνεις μέσα στην εβδομάδα και πόσες φορές το καθένα. Οι βαθμοί και τα χρώματα στο σώμα αλλάζουν αμέσως.')}</p>
+    <p class="sub">${T('The programs and exercises come from the Programs section, the only place to add or remove them. Here you set the sets of each exercise, how many times a week you do each program and which programs are in your week. The Progress tab always has the same exercises and sets.', 'Τα προγράμματα και οι ασκήσεις έρχονται από την ενότητα «Προγράμματα», τη μόνη όπου προσθέτεις ή αφαιρείς ασκήσεις. Εδώ ορίζεις τα σετ κάθε άσκησης, πόσες φορές την εβδομάδα κάνεις κάθε πρόγραμμα και ποια προγράμματα είναι στην εβδομάδα σου. Η καρτέλα Πρόοδος έχει πάντα τις ίδιες ασκήσεις και τα ίδια σετ.')}</p>
     ${mapProgramUnsaved(progs) ? `<div class="rv-note"><span>${T(`The program on your map (${userProgram.length} exercises) is not saved, so it is not part of the review.`, `Το πρόγραμμα του χάρτη (${userProgram.length} ασκήσεις) δεν είναι αποθηκευμένο, οπότε δεν μετράει στην αξιολόγηση.`)}</span><button type="button" class="btn" data-savemap>${T('Save it', 'Αποθήκευσέ το')}</button></div>` : ''}
-    <div class="rv-plist">${cards || `<p class="msg">${T('You have no saved programs yet. Add a coach template for a complete week, or create your own program.', 'Δεν έχεις ακόμα αποθηκευμένα προγράμματα. Πρόσθεσε ένα πρότυπο προπονητή για ολόκληρη εβδομάδα ή φτιάξε δικό σου πρόγραμμα.')}</p>`}</div>
+    <div class="rv-plist">${cards || `<p class="msg">${T('You have no saved programs yet. Create them in the Programs section, where you can also add a coach template for a complete week.', 'Δεν έχεις ακόμα αποθηκευμένα προγράμματα. Φτιάξε τα στην ενότητα «Προγράμματα», όπου μπορείς να προσθέσεις και πρότυπο προπονητή για ολόκληρη εβδομάδα.')}</p>`}</div>
     <div class="actions rv-actions">
-      <button type="button" class="btn" data-new>${T('＋ New program', '＋ Νέο πρόγραμμα')}</button>
-      ${tplSelect}
-    </div>
-    <datalist id="rvExList">${[...exById.values()].map((e) => `<option value="${esc(e.el)}"></option>`).join('')}</datalist>`;
+      <button type="button" class="btn" data-goprog>${T('Open the Programs section', 'Άνοιξε την ενότητα «Προγράμματα»')}</button>
+    </div>`;
 }
 
 function tabMuscles(result) {
   return `
-    <p class="sub">${T('Sets a week (primary muscle = 1 set, secondary = ½) · times a week · score. Tap a muscle, here or on the body, for details.', 'Σετ την εβδομάδα (κύριος μυς = 1 σετ, βοηθητικός = ½) · φορές την εβδομάδα · βαθμός. Πάτα έναν μυ, εδώ ή πάνω στο σώμα, για λεπτομέρειες.')}</p>
+    <p class="sub">${T('Each rating uses all the review tabs: the sets and times a week of the Programs tab, the load progression of the Progress tab, the set target of your goal (Goals and Body tabs) and your body measurements. Sets a week (primary muscle = 1 set, secondary = ½) · times a week · score. Tap a muscle, here or on the body, for details.', 'Κάθε βαθμός χρησιμοποιεί όλες τις καρτέλες της αξιολόγησης: τα σετ και τις φορές την εβδομάδα της καρτέλας Προγράμματα, την πρόοδο φορτίου της καρτέλας Πρόοδος, τον στόχο σετ του στόχου σου (καρτέλες Στόχοι και Σώμα) και τις μετρήσεις του σώματός σου. Σετ την εβδομάδα (κύριος μυς = 1 σετ, βοηθητικός = ½) · φορές την εβδομάδα · βαθμός. Πάτα έναν μυ, εδώ ή πάνω στο σώμα, για λεπτομέρειες.')}</p>
+    ${result.goal && result.goal.type !== 'build' && result.goal.type !== 'bulk' && result.goal.type !== 'recomp' ? `<p class="rv-note"><span>${T(`Goal: ${esc(result.goal.label.toLowerCase())}${result.goal.inferred ? ' (suggested)' : ''}. The set targets are lower than for growth (maintenance volume).`, `Στόχος: ${esc(result.goal.label.toLowerCase())}${result.goal.inferred ? ' (πρόταση)' : ''}. Οι στόχοι σετ είναι χαμηλότεροι από την ανάπτυξη (όγκος συντήρησης).`)}</span></p>` : ''}
     ${result.groups.map((g) => `
       <h3 class="rv-ghead" id="rvg-${g.id}"><span>${esc(g.name)}</span>${pill(g.score, g.band)}</h3>
       <ul class="rv-mrows">${g.muscles.map((m) => {
@@ -905,7 +914,8 @@ function tabMuscles(result) {
             <p class="rv-mfull">${esc(m.full)}</p>
             ${vbar(m)}
             <p>${esc(muscleStatus(m))}</p>
-            ${m.contrib.length ? `<ul class="rv-contrib">${m.contrib.map((c) => `<li><span>${esc(c.ex.el)} <small>· ${esc(c.program.name)} · ${c.sets} ${setsWord(c.sets)}${c.perWeek > 1 ? ` × ${c.perWeek}` : ''}${c.role < 1 ? T(' · secondary ½', ' · βοηθητικός ½') : ''}</small></span><b>${nf(c.weekly)}</b></li>`).join('')}</ul>` : ''}
+            ${muscleParts(m, result)}
+            ${m.contrib.length ? `<ul class="rv-contrib">${m.contrib.map((c) => `<li><span>${esc(c.ex.el)} <small>· ${esc(c.program.name)} · ${c.sets} ${setsWord(c.sets)}${c.perWeek > 1 ? ` × ${c.perWeek}` : ''}${c.role < 1 ? T(' · secondary ½', ' · βοηθητικός ½') : ''} · ${c.level ? esc(window.__mxProg.setsText(c.level.cur.sets)) : T('no logged load', 'χωρίς καταγραφή φορτίου')}</small></span><b>${nf(c.weekly)}</b></li>`).join('')}</ul>` : ''}
             <div class="actions"><button type="button" class="btn" data-look="${m.id}">${T('Show on the body', 'Δες στο σώμα')}</button><button type="button" class="btn ghost" data-exs="${esc(unitOf(m.ids[0]))}">${T('Exercises for this muscle', 'Ασκήσεις για τον μυ')}</button></div>
           </div>` : ''}
         </li>`;
@@ -957,12 +967,12 @@ function tabTips(result, progs) {
   const target = targetOf(progs);
   const coach = rv.coach;
   return `
-    ${progs.length && tips.some((t) => t.actions.some((a) => a.type === 'add')) ? `<div class="rv-target"><label for="rvTarget">${T('Exercises you add go to', 'Οι ασκήσεις που προσθέτεις πηγαίνουν στο')}</label><select id="rvTarget" data-tiptarget data-key="target">${progs.map((p) => `<option value="${esc(p.id)}"${p.id === target ? ' selected' : ''}>${esc(p.name)}${p.active ? '' : T(' (not in the week)', ' (εκτός εβδομάδας)')}</option>`).join('')}</select></div>` : ''}
+    ${progs.length && tips.some((t) => t.actions.some((a) => a.type === 'add')) ? `<div class="rv-target"><label for="rvTarget">${T('Exercises you add go to (you confirm them in the Programs section)', 'Οι ασκήσεις που προσθέτεις πηγαίνουν στο (τις επιβεβαιώνεις στην ενότητα «Προγράμματα»)')}</label><select id="rvTarget" data-tiptarget data-key="target">${progs.map((p) => `<option value="${esc(p.id)}"${p.id === target ? ' selected' : ''}>${esc(p.name)}${p.active ? '' : T(' (not in the week)', ' (εκτός εβδομάδας)')}</option>`).join('')}</select></div>` : ''}
     ${tips.length ? `<ol class="rv-suggs">${shown.map((t, i) => `
       <li class="rv-sugg kind-${t.kind}">
         <div class="rv-sugg-head">${t.muscle ? pill(t.muscle.score, t.muscle.band) : ''}<b>${esc(t.title)}</b></div>
         <p>${esc(t.text)}</p>
-        ${t.actions.length ? `<div class="rv-sugg-actions">${t.actions.map((a, j) => `<button type="button" class="btn" data-act="${a.type}" data-ex="${esc(a.ex ?? '')}" data-sets="${a.sets ?? ''}" data-id="${esc(a.id ?? '')}" data-program="${esc(a.program ?? '')}" data-n="${a.n ?? ''}" data-key="act:${i}:${j}">${actionLabel(a, progs)}</button>`).join('')}</div>` : ''}
+        ${t.actions.length ? `<div class="rv-sugg-actions">${t.actions.map((a, j) => `<button type="button" class="btn" data-act="${a.type}" data-ex="${esc(a.ex ?? '')}" data-sets="${a.sets ?? ''}" data-id="${esc(a.id ?? '')}" data-program="${esc(a.program ?? '')}" data-pid="${esc(a.pid ?? '')}" data-n="${a.n ?? ''}" data-key="act:${i}:${j}">${actionLabel(a, progs)}</button>`).join('')}</div>` : ''}
       </li>`).join('')}</ol>
       ${tips.length > shown.length ? `<button type="button" class="rv-link" data-alltips>${T(`All suggestions (${tips.length})`, `Όλες οι προτάσεις (${tips.length})`)}</button>` : ''}`
     : `<p class="msg">${T('Nothing important to change: the program meets the goal for every muscle.', 'Δεν βρήκα κάτι σημαντικό να αλλάξεις. Το πρόγραμμα καλύπτει τον στόχο για όλους τους μύες.')}</p>`}
@@ -1011,7 +1021,6 @@ function renderReview({ fresh = false, ifChanged = false, scrollTo = null, focus
     art = $('#panel > article.review');
     art.addEventListener('click', onReviewClick);
     art.addEventListener('change', onReviewChange);
-    art.addEventListener('submit', onReviewSubmit);
   }
   const goalName = window.__mxBody?.goalLabel({ sessions: result.weeklySessions }) || T('muscle growth', 'μυϊκή ανάπτυξη');
   const eyebrow = `<div class="eyebrow"><span>${T('Program review', 'Αξιολόγηση προγράμματος')}</span><span class="tag">${T('Goal: ', 'Στόχος: ')}${esc(goalName.charAt(0).toLowerCase() + goalName.slice(1))}</span></div>`;
@@ -1057,10 +1066,10 @@ function renderReview({ fresh = false, ifChanged = false, scrollTo = null, focus
         <li>${T('Volume, the rule of 10: each muscle group needs at least 10 sets a week, ideally 10–20. Below that the score drops in proportion (6 sets = 6/10). The small assisting muscles (rotator cuff, forearms, shins, hip flexors, front delts, upper traps, obliques, brachialis) need at least 6.', 'Όγκος, ο κανόνας του 10: κάθε μυϊκή ομάδα θέλει τουλάχιστον 10 σετ την εβδομάδα, ιδανικά 10–20. Με λιγότερα ο βαθμός πέφτει αναλογικά (6 σετ = 6/10). Οι μικροί βοηθητικοί μύες (στροφικό πέταλο, πήχεις, κνήμη, καμπτήρες ισχίου, μπροστινός ώμος, άνω τραπεζοειδής, λοξοί, βραχιόνιος) θέλουν τουλάχιστον 6.')}</li>
         <li>${T('Frequency: each muscle at least twice a week (a session counts when it gives the muscle 1.5 sets or more).', 'Συχνότητα: κάθε μυς τουλάχιστον 2 φορές την εβδομάδα (μια προπόνηση μετράει αν δίνει ≥1,5 σετ στον μυ).')}</li>
         <li>${T('Distribution: up to about 10 sets for the same muscle in one session.', 'Κατανομή: έως ~10 σετ για τον ίδιο μυ σε μία προπόνηση.')}</li>
-        <li>${T('Muscle score = 70% volume + 25% frequency + 5% distribution. Group score = average of its muscles, with the big muscles counting three times.', 'Βαθμός μυός = 70% όγκος + 25% συχνότητα + 5% κατανομή. Ομάδα = μέσος όρος των μυών της, με τους μεγάλους μύες να μετράνε τριπλά.')}</li>
-        <li>${T('Overall score = 75% the muscles + 13% balance (push/pull, quads/hamstrings, upper/lower body) + 12% progressive overload.', 'Συνολικός βαθμός = 75% οι μύες + 13% ισορροπία (ώθηση/έλξη, τετρακέφαλοι/οπίσθιοι, άνω/κάτω σώμα) + 12% πρόοδος φορτίου.')}</li>
+        <li>${T('Muscle score, from all the review tabs: 85% sets & frequency (Programs tab: 70% volume + 25% frequency + 5% distribution) + 15% load progression of the exercises that train it (Progress tab, weighted by their sets). With fat loss or maintenance as your goal (Goals and Body tabs) the set target drops to about 70% or 60% of the rule of 10. A measurement that has not grown for 6+ weeks while you aim for growth (Body tab) takes 0.5 off. Group score = average of its muscles, with the big muscles counting three times.', 'Βαθμός μυός, από όλες τις καρτέλες της αξιολόγησης: 85% σετ & συχνότητα (καρτέλα Προγράμματα: 70% όγκος + 25% συχνότητα + 5% κατανομή) + 15% πρόοδος φορτίου των ασκήσεων που τον δουλεύουν (καρτέλα Πρόοδος, με βάρος τα σετ τους). Με στόχο απώλεια λίπους ή διατήρηση (καρτέλες Στόχοι και Σώμα) ο στόχος σετ πέφτει περίπου στο 70% ή 60% του κανόνα των 10. Μια περιφέρεια που δεν μεγαλώνει 6+ εβδομάδες ενώ στοχεύεις ανάπτυξη (καρτέλα Σώμα) αφαιρεί 0,5. Ομάδα = μέσος όρος των μυών της, με τους μεγάλους μύες να μετράνε τριπλά.')}</li>
+        <li>${T('Overall score = 87% the muscles + 13% balance (push/pull, quads/hamstrings, upper/lower body).', 'Συνολικός βαθμός = 87% οι μύες + 13% ισορροπία (ώθηση/έλξη, τετρακέφαλοι/οπίσθιοι, άνω/κάτω σώμα).')}</li>
         <li>${T('Goals: when you add your body data (Body tab), 10% of the score is how well the plan fits your goal (fat loss, muscle gain, recomposition or maintenance): workouts a week, volume and progression for that goal, and, once you have measurements over 2+ weeks, whether your weight is moving at a healthy pace toward it. Without goals, the focus is suggested from your measurements.', 'Στόχοι: όταν προσθέσεις στοιχεία σώματος (καρτέλα Σώμα), το 10% του βαθμού είναι πόσο ταιριάζει το πρόγραμμα στον στόχο σου (απώλεια λίπους, μυϊκή ανάπτυξη, ανασύνθεση ή διατήρηση): προπονήσεις την εβδομάδα, όγκος και πρόοδος φορτίου για αυτόν τον στόχο και, όταν υπάρχουν μετρήσεις 2+ εβδομάδων, αν το βάρος σου κινείται με υγιή ρυθμό προς αυτόν. Χωρίς στόχους, η κατεύθυνση προτείνεται από τις μετρήσεις σου.')}</li>
-        <li>${T('Progressive overload: half of this score is how many of your exercises have a logged weight, the other half is whether you keep raising it. After 2 weeks at the same load you are ready to progress; after 4 weeks the lift counts as stalled. Log your levels in the Progress tab.', 'Πρόοδος φορτίου: το μισό του βαθμού είναι πόσες ασκήσεις έχουν καταγεγραμμένα κιλά και το άλλο μισό αν συνεχίζεις να τα ανεβάζεις. Μετά από 2 εβδομάδες με το ίδιο φορτίο είσαι έτοιμος να ανέβεις· μετά από 4 εβδομάδες η άσκηση θεωρείται κολλημένη. Κατάγραψε τα φορτία στην καρτέλα Πρόοδος.')}</li>
+        <li>${T('Progressive overload (the Progression figure above): half is how many of your exercises have logged sets, the other half is whether you keep raising them. After 2 weeks at the same load you are ready to progress; after 4 weeks the lift counts as stalled. Log each set in the Progress tab; the number of sets comes from the Programs tab.', 'Πρόοδος φορτίου (ο δείκτης «Πρόοδος φορτίου» παραπάνω): το μισό είναι πόσες ασκήσεις έχουν καταγεγραμμένα σετ και το άλλο μισό αν συνεχίζεις να τα ανεβάζεις. Μετά από 2 εβδομάδες με το ίδιο φορτίο είσαι έτοιμος να ανέβεις· μετά από 4 εβδομάδες η άσκηση θεωρείται κολλημένη. Κατάγραψε κάθε σετ στην καρτέλα Πρόοδος· ο αριθμός των σετ έρχεται από την καρτέλα Προγράμματα.')}</li>
       </ul>
     </details>`;
   if (window.__mxProg && rv.tab === 'progress') window.__mxProg.mountTab(art.querySelector('#rvProg'), progs);
@@ -1115,15 +1124,11 @@ async function onReviewClick(e) {
     renderReview();
     return;
   }
-  if ('rm' in d && p) {
-    const i = Number(d.rm);
-    changeProgram(p.id, ({ names }) => ({ names: names.filter((_, k) => k !== i) }));
-    renderReview({ focus: `[data-pid="${CSS.escape(p.id)}"] .rv-additem input` });
-    return;
-  }
-  if ('edit' in d && p) { flushAll(); api?.openEdit(p.id); return; }
-  if ('new' in d) { flushAll(); api?.openNew(''); return; }
-  if ('savemap' in d) { api?.openNew(userProgram.join('\n')); return; }
+  // η προσθήκη/αφαίρεση ασκήσεων γίνεται μόνο στην ενότητα «Προγράμματα»
+  if ('edit' in d && p) { flushAll(); api?.openEdit(p.id, { returnTo: 'review' }); return; }
+  if ('goprog' in d) { flushAll(); api?.show?.(); return; }
+  if ('savemap' in d) { flushAll(); api?.openNew(userProgram.join('\n'), { returnTo: 'review' }); return; }
+  if ('recog' in d && p) { recognise(p, Number(d.recog), t); return; }
   if (d.m) {
     rv.muscle = rv.muscle === d.m ? null : d.m;
     viewer?.setSelectedIds(rv.muscle ? scoredMeshIds(rv.muscle) : []);
@@ -1145,23 +1150,40 @@ async function onReviewClick(e) {
     if (d.act === 'tab') { rv.tab = d.id; renderReview({ scrollTo: '#rvTabpanel' }); return; }
     if (d.act === 'progress') {
       rv.tab = 'progress';
-      if (window.__mxProg) window.__mxProg.focus = d.ex;
-      renderReview({ scrollTo: `[data-pgex="${CSS.escape(d.ex)}"]` });
+      if (window.__mxProg) window.__mxProg.focus = { ex: d.ex, pid: d.pid || null };
+      renderReview({ scrollTo: `[data-pgex="${CSS.escape(d.ex)}"]${d.pid ? `[data-pgpid="${CSS.escape(d.pid)}"]` : ''}` });
       return;
     }
     const progs = reviewPrograms();
     if (d.act === 'add') {
       const pid = targetOf(progs);
-      const prog = pid ? addExerciseTo(pid, d.ex, Number(d.sets) || 3) : null;
-      if (prog) rv.flash = T(`Added ${exById.get(d.ex)?.el} · ${d.sets} sets to “${prog.name}”.`, `Προστέθηκε: ${exById.get(d.ex)?.el} · ${d.sets} σετ στο «${prog.name}».`);
-    } else if (d.act === 'template') {
-      t.disabled = true;
-      try {
-        const made = await addTemplates([d.id]);
-        if (made[0]) rv.flash = T(`Added the template “${made[0].name}”, ${made[0].perWeek}× a week. You will find it under Programs.`, `Προστέθηκε το πρότυπο «${made[0].name}» ${made[0].perWeek}×/εβδ. Το βρίσκεις στα Προγράμματα.`);
-      } catch {
-        rv.flash = T('The template could not be added. Try again.', 'Το πρότυπο δεν προστέθηκε. Δοκίμασε ξανά.');
+      const prog = progs.find((x) => x.id === pid);
+      const ex = exById.get(d.ex);
+      const n = Number(d.sets) || 3;
+      if (!prog || !ex) return;
+      const have = prog.items.find((it) => it.ex === d.ex);
+      if (have) {
+        // ήδη στο πρόγραμμα: μόνο περισσότερα σετ (τα σετ ορίζονται εδώ)
+        changeProgram(pid, ({ plan }) => {
+          const cur = plan.sets.find((x) => x.name === have.name);
+          if (cur) cur.n = Math.min(20, cur.n + n); else plan.sets.push({ name: have.name, n: Math.min(20, have.sets + n) });
+          return { plan };
+        });
+        rv.flash = T(`${ex.el}: +${n} sets in “${prog.name}”.`, `${ex.el}: +${n} σετ στο «${prog.name}».`);
+      } else {
+        // νέα άσκηση: μπαίνει από την ενότητα «Προγράμματα», όπου την επιβεβαιώνεις με «Αποθήκευση»
+        flushAll();
+        api?.openEdit(pid, { append: [{ name: ex.el, sets: n }], returnTo: 'review', note: T(`“${ex.el}” · ${n} sets was added to the list from the review. Press Save to keep it, or Cancel.`, `Το «${ex.el}» · ${n} σετ προστέθηκε στη λίστα από την αξιολόγηση. Πάτα «Αποθήκευση» για να μείνει ή «Άκυρο».`) });
+        return;
       }
+    } else if (d.act === 'template') {
+      const tp = window.__mxProgram.templates().list.find((x) => x.id === d.id);
+      if (!tp) return;
+      const sets = {};
+      tp.items.forEach((it) => { sets[it.name] = it.sets; });
+      flushAll();
+      api?.openNew(tp.items.map((it) => it.name).join('\n'), { name: tp.name, sets, plan: { perWeek: tp.perWeek, inWeek: true }, returnTo: 'review', note: T(`Coach template “${tp.name}”, ${tp.perWeek}× a week. Press Save to add it to your programs.`, `Πρότυπο προπονητή «${tp.name}», ${tp.perWeek}×/εβδ. Πάτα «Αποθήκευση» για να μπει στα προγράμματά σου.`) });
+      return;
     } else if (d.act === 'perweek') {
       const prog = changeProgram(d.program, ({ plan }) => ({ plan: { ...plan, perWeek: Number(d.n) || 2, inWeek: true } }));
       if (prog) rv.flash = T(`“${prog.name}” is now ${Number(d.n) || 2} times a week.`, `Το «${prog.name}» μπήκε ${Number(d.n) || 2} φορές την εβδομάδα.`);
@@ -1183,61 +1205,29 @@ async function onReviewChange(e) {
     renderReview();
     return;
   }
-  if ('template' in t.dataset && t.value) {
-    const v = t.value;
-    t.disabled = true;
-    const ids = v.startsWith('pack:') ? TEMPLATES.filter((x) => x.pack === v.slice(5)).map((x) => x.id) : [v];
-    try {
-      const made = await addTemplates(ids);
-      made.forEach((x) => x.id && rv.open.add(x.id));
-      if (made.length) {
-        rv.flash = T(`Added ${made.map((x) => `“${x.name}” ${x.perWeek}×/week`).join(', ')}.`, `Προστέθηκαν: ${made.map((x) => `«${x.name}» ${x.perWeek}×/εβδ.`).join(', ')}.`);
-      }
-    } catch {
-      rv.flash = T('The template could not be added. Try again.', 'Το πρότυπο δεν προστέθηκε. Δοκίμασε ξανά.');
-    }
-    if (state.mode === 'review') renderReview({ focus: '[data-template]' });
-    return;
-  }
   if ('tiptarget' in t.dataset) rv.target = t.value;
 }
 
-async function onReviewSubmit(e) {
-  const form = e.target.closest('form[data-add]');
-  if (!form) return;
-  e.preventDefault();
-  const p = programOf(form);
-  const input = form.querySelector('input');
-  const msg = form.parentElement.querySelector('.rv-addmsg');
-  const q = input.value.trim();
-  if (!p || !q) return;
-  let ex = resolveExercise(q);
-  if (!ex) {
-    const sample = state.claudeOff ? null : await getSample();
-    if (!sample) {
-      const sugg = index.search(q, 6).filter((r) => r.type === 'exercise').slice(0, 3);
-      msg.innerHTML = `<p class="msg">${esc(T(`“${q}” was not found.`, `Δεν βρέθηκε το «${q}».`))}${sugg.length ? ' ' + T('Did you mean:', 'Μήπως εννοείς:') : ''}</p>${sugg.length ? `<div class="mchips">${sugg.map((r) => `<button type="button" class="mchip s" data-addex="${esc(r.id)}">${esc(r.title)}</button>`).join('')}</div>` : ''}`;
-      msg.querySelectorAll('[data-addex]').forEach((b) => b.addEventListener('click', () => {
-        addExerciseTo(p.id, b.dataset.addex, 3);
-        renderReview({ focus: `[data-pid="${CSS.escape(p.id)}"] .rv-additem input` });
-      }));
-      return;
-    }
-    msg.innerHTML = `<div class="thinking"><i class="pulse"></i><span>${T('Not in the database, so I am asking Claude…', 'Δεν υπάρχει στη βάση· τη ρωτάω στο Claude…')}</span></div>`;
-    try {
-      const r = await analyzeExercise(q, {});
-      if (!r.recognized) { msg.innerHTML = `<p class="msg">${esc(T(`Claude did not recognise “${q}” as an exercise.`, `Το Claude δεν αναγνώρισε το «${q}» ως άσκηση.`))}</p>`; return; }
-      addCustom(r.exercise);
-      ex = r.exercise;
-    } catch (err) {
-      if (HIDE_CODES.has(err?.code)) state.claudeOff = true;
-      msg.innerHTML = `<p class="msg">${esc(ERROR_TEXT[err?.code] ?? __G('Δεν ήταν δυνατή η ανάλυση αυτή τη στιγμή.'))}</p>`;
-      return;
-    }
+// άσκηση που δεν αναγνωρίστηκε: το Claude την αναλύει και μπαίνει στη βάση (η λίστα του προγράμματος δεν αλλάζει)
+async function recognise(p, i, btn) {
+  const name = p.names[i];
+  if (!name) return;
+  const li = btn.closest('li');
+  btn.disabled = true;
+  const say = (html) => { let m = li.querySelector('.rv-recogmsg'); if (!m) { m = document.createElement('div'); m.className = 'rv-recogmsg'; li.appendChild(m); } m.innerHTML = html; };
+  const sample = state.claudeOff ? null : await getSample();
+  if (!sample) { say(`<p class="msg">${T('Claude is not available right now. Check the name in the Programs section.', 'Το Claude δεν είναι διαθέσιμο τώρα. Έλεγξε το όνομα στην ενότητα «Προγράμματα».')}</p>`); btn.disabled = false; return; }
+  say(`<div class="thinking"><i class="pulse"></i><span>${T('Asking Claude…', 'Ρωτάω το Claude…')}</span></div>`);
+  try {
+    const r = await analyzeExercise(name, {});
+    if (!r.recognized) { say(`<p class="msg">${esc(T(`Claude did not recognise “${name}” as an exercise. Correct it in the Programs section.`, `Το Claude δεν αναγνώρισε το «${name}» ως άσκηση. Διόρθωσέ το στην ενότητα «Προγράμματα».`))}</p>`); btn.disabled = false; return; }
+    addCustom({ ...r.exercise, aka: [...new Set([...(r.exercise.aka || []), name])] });
+    renderReview();
+  } catch (err) {
+    if (HIDE_CODES.has(err?.code)) state.claudeOff = true;
+    say(`<p class="msg">${esc(ERROR_TEXT[err?.code] ?? __G('Δεν ήταν δυνατή η ανάλυση αυτή τη στιγμή.'))}</p>`);
+    btn.disabled = false;
   }
-  addExerciseTo(p.id, ex.id, 3);
-  input.value = '';
-  if (state.mode === 'review') renderReview({ focus: `[data-pid="${CSS.escape(p.id)}"] .rv-additem input` });
 }
 
 async function runCoach() {

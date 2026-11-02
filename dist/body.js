@@ -224,8 +224,9 @@
     const reasons = [];
     const sess = t === 'maintain' ? (S >= 2 ? 10 : 6) : t === 'cut' ? (S >= 3 ? 10 : S === 2 ? 6.5 : 3.5) : (S >= 4 ? 10 : S === 3 ? 9 : S === 2 ? 6.5 : 3.5);
     reasons.push([sess, T(`${S} ${S === 1 ? 'workout' : 'workouts'} a week`, `${S} ${S === 1 ? 'προπόνηση' : 'προπονήσεις'} την εβδομάδα`), sess >= 9 ? T('enough for this goal', 'αρκετές για τον στόχο') : T(t === 'cut' ? 'aim for at least 3 to keep muscle and burn more' : 'aim for 3–4 to grow', t === 'cut' ? 'στόχευσε τουλάχιστον 3, για να κρατήσεις μύες και να καις περισσότερο' : 'στόχευσε 3–4 για ανάπτυξη')]);
-    const vol = t === 'cut' ? Math.min(10, ctx.volume * 1.25) : t === 'maintain' ? Math.min(10, ctx.volume * 1.4) : ctx.volume;
-    reasons.push([vol, T('Weekly volume', 'Εβδομαδιαίος όγκος'), t === 'cut' ? T('during fat loss about ⅔ of the growth volume keeps muscle', 'στην απώλεια λίπους τα ⅔ του όγκου ανάπτυξης αρκούν για να κρατήσεις μύες') : T('growth needs ~10+ hard sets per muscle', 'η ανάπτυξη θέλει ~10+ σκληρά σετ ανά μυ')]);
+    // ο όγκος ήδη μετριέται με τον στόχο σετ του στόχου σου (review.js GOAL_SETS)
+    const vol = ctx.volume;
+    reasons.push([vol, T('Weekly volume', 'Εβδομαδιαίος όγκος'), t === 'cut' ? T('during fat loss about 7 hard sets per big muscle keep it', 'στην απώλεια λίπους ~7 σκληρά σετ ανά μεγάλο μυ αρκούν για να τον κρατήσεις') : t === 'maintain' ? T('about 6 hard sets per big muscle keep your shape', '~6 σκληρά σετ ανά μεγάλο μυ κρατούν τη φόρμα σου') : T('growth needs ~10+ hard sets per muscle', 'η ανάπτυξη θέλει ~10+ σκληρά σετ ανά μυ')]);
     const ov = ctx.overload == null ? 5 : ctx.overload;
     reasons.push([ov, T('Progressive overload', 'Πρόοδος φορτίου'), t === 'cut' ? T('keeping your loads protects muscle in a deficit', 'η διατήρηση των φορτίων προστατεύει τους μύες στο έλλειμμα') : T('more load over time is what drives growth', 'η αύξηση φορτίου με τον καιρό φέρνει την ανάπτυξη')]);
     let align;
@@ -315,6 +316,20 @@
     return l;
   }
 
+  // ο στόχος (ορισμένος ή προτεινόμενος από τις μετρήσεις) για τους στόχους σετ ανά μυ
+  function goalType() { const gi = goalInfo(metrics(0)); return gi.type ? { type: gi.type, inferred: !!gi.inferred, label: TYPE[gi.type][0] } : null; }
+  // πορεία της περιφέρειας που αντιστοιχεί σε έναν μυ (≥ 6 εβδομάδες μετρήσεων)
+  function muscleTrend(mid) {
+    const k = Object.keys(MEAS_MUSCLES).find((x) => MEAS_MUSCLES[x].includes(mid));
+    if (!k) return null;
+    const s = series(k);
+    if (s.length < 2) return null;
+    const a = s[0], b = s[s.length - 1];
+    const wk = days(a.date, b.date) / 7;
+    if (wk < 6) return null;
+    const d = b.v - a.v;
+    return { key: k, name: MEAS.find((x) => x[0] === k)[1], from: a, to: b, weeks: Math.round(wk), delta: d, state: d <= 0.2 ? 'flat' : 'grow' };
+  }
   const sig = () => JSON.stringify(data).length + ':' + data.entries.map((e) => e.id + e.date).join('|') + JSON.stringify(data.profile) + JSON.stringify(data.goals) + '@' + today();
   const goalLabel = (ctx) => { const mt = metrics(ctx ? ctx.sessions : 0); const gi = goalInfo(mt); return gi.type ? TYPE[gi.type][0] + (gi.inferred ? T(' (suggested)', ' (πρόταση)') : '') : null; };
 
@@ -577,5 +592,5 @@ form.bd-grid3>.bd-h{grid-column:1/-1}
   listeners.push(() => { try { window.__mxProgram && window.__mxProgram.onPrograms && window.__mxProgram.onPrograms(); } catch (e) { /* ignore */ } });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initCloud); else initCloud();
 
-  window.__mxBody = { metrics, fit, tips, coachLines, sig, goalLabel, mountTab, mountGoals, TYPE, onChange: (f) => listeners.push(f), data: () => JSON.parse(JSON.stringify(data)) };
+  window.__mxBody = { metrics, fit, tips, coachLines, sig, goalLabel, goalType, muscleTrend, fmtCm: (v) => nf(v), mountTab, mountGoals, TYPE, onChange: (f) => listeners.push(f), data: () => JSON.parse(JSON.stringify(data)) };
 })();

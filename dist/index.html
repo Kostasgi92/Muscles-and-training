@@ -559,6 +559,8 @@ button { cursor: pointer; }
 }
 .pv-sub { margin: 6px 0 0; color: var(--ink-2); max-width: 58ch; }
 .pv-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.pv-template { max-width: 100%; padding: 8px 10px; border-radius: 9px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; font-size: .9rem; }
+.pform-note { margin: 0 0 10px; padding: 8px 10px; border-radius: 9px; background: var(--second-soft); font-size: .88rem; }
 .pv-note { margin: 10px 0 0; font-size: .82rem; color: var(--ink-2); }
 .pv-status { margin: 8px 0 12px; min-height: 1.4em; font-size: .88rem; color: var(--ink-2); }
 .pcard {
@@ -722,7 +724,9 @@ button { cursor: pointer; }
 }
 .rv-additem input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .rv-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.rv-items li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: .9rem; }
+.rv-items li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 8px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: .9rem; }
+.rv-items .rv-recog, .rv-items .rv-recogmsg { grid-column: 1 / -1; justify-self: start; }
+.rv-recogmsg .msg { margin: 2px 0; font-size: .82rem; }
 .rv-items li:last-child { border-bottom: none; }
 .rv-iname { min-width: 0; overflow-wrap: anywhere; }
 .rv-iname small { color: var(--accent); font-size: .7rem; }
@@ -856,6 +860,13 @@ button { cursor: pointer; }
 @media (max-width: 600px) {
   .mvcap { bottom: auto; top: 56px; font-size: .8rem; }
 }
+
+.rv-mparts { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; font-size: .86rem; }
+.rv-mparts li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; padding: 6px 8px; border-radius: 8px; background: var(--surface-2); }
+.rv-mparts li > small { grid-column: 1 / -1; color: var(--ink-2); font-size: .76rem; }
+.rv-mparts li span small { color: var(--ink-2); }
+.rv-mparts b { font-variant-numeric: tabular-nums; }
+.rv-mformula { margin: 6px 0 0; font-size: .78rem; color: var(--ink-2); }
 </style>
 
 <div class="app" id="app" data-anatomy-bytes="3523496">

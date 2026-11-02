@@ -79,6 +79,8 @@ export function roleOf(ex, ids) {
   return 0;
 }
 
+// σετ που χρειάζεται ένας μυς ανά στόχο, ως ποσοστό του κανόνα των 10 (απώλεια λίπους/διατήρηση: όγκος συντήρησης)
+export const GOAL_SETS = { cut: 0.7, maintain: 0.6, recomp: 1, bulk: 1, build: 1 };
 export const minOf = (m) => m.min ?? (m.w <= 1 ? RULES.minorMin : RULES.min);
 export const volScore = (V, min = RULES.min) => (V <= 0 ? 0 : V < min ? (10 * V) / min : V <= RULES.max ? 10 : Math.max(6, 10 - (V - RULES.max) * 0.25));
 export const freqScore = (hits, V) => (V <= 0 ? 0 : hits >= RULES.freqTarget ? 10 : hits === 1 ? 5 : 3);
@@ -124,7 +126,11 @@ export function analyze(programs, exById) {
   for (const p of active) {
     for (let k = 0; k < p.perWeek; k++) sessions.push({ program: p, sets: new Map(), total: 0 });
   }
-  const muscles = SCORED.map((m) => ({ ...m, min: minOf(m), V: 0, hits: 0, maxS: 0, contrib: [] }));
+  // καρτέλες Σώμα/Στόχοι (addons/body.js): ο στόχος αλλάζει τα σετ που χρειάζεται κάθε μυς
+  const bodyApi = typeof window !== 'undefined' ? window.__mxBody : null;
+  const goal = bodyApi && bodyApi.goalType ? bodyApi.goalType() : null;
+  const gk = goal ? GOAL_SETS[goal.type] || 1 : 1;
+  const muscles = SCORED.map((m) => ({ ...m, min: Math.max(3, Math.round(minOf(m) * gk)), baseMin: minOf(m), V: 0, hits: 0, maxS: 0, contrib: [] }));
   for (const s of sessions) {
     for (const it of s.program.items) {
       const ex = exById.get(it.ex);
@@ -146,6 +152,9 @@ export function analyze(programs, exById) {
       }
     }
   }
+  // καρτέλα Πρόοδος (addons/progress.js): πόσο προχωράνε τα φορτία των ασκήσεων κάθε μυός
+  const prog = typeof window !== 'undefined' ? window.__mxProg : null;
+  const growth = !goal || ['bulk', 'build', 'recomp'].includes(goal.type);
   for (const m of muscles) {
     for (const s of sessions) {
       const v = s.sets.get(m.id) ?? 0;
@@ -156,9 +165,26 @@ export function analyze(programs, exById) {
     m.vol = volScore(m.V, m.min);
     m.freq = freqScore(m.hits, m.V);
     m.dist = distScore(m.maxS);
-    m.score = muscleScore(m.V, m.hits, m.maxS, m.min);
-    m.band = bandOf(m.V, m.score);
+    m.base = muscleScore(m.V, m.hits, m.maxS, m.min);
     m.contrib.sort((a, b) => b.weekly - a.weekly);
+    // πρόοδος φορτίου του μυός: μέσος όρος των ασκήσεών του, με βάρος τα εβδομαδιαία σετ (χωρίς καταγραφή = 0)
+    m.prog = null;
+    m.logged = 0;
+    if (prog && prog.health && m.contrib.length) {
+      let w = 0, hsum = 0;
+      for (const c of m.contrib) {
+        c.health = prog.health(c.program.id, c.ex.id, c.sets);
+        c.level = prog.status ? prog.status({ pid: c.program.id, key: c.ex.id, ex: c.ex.id, sets: c.sets }) : null;
+        w += c.weekly;
+        if (c.health != null) { hsum += c.weekly * c.health; m.logged++; }
+      }
+      m.prog = w ? (10 * hsum) / w : 0;
+    }
+    // καρτέλα Σώμα: περιφέρεια που δεν μεγαλώνει ενώ ο στόχος είναι ανάπτυξη
+    m.trend = bodyApi && bodyApi.muscleTrend ? bodyApi.muscleTrend(m.id) : null;
+    m.trendPenalty = m.trend && m.trend.state === 'flat' && growth && m.V > 0 ? 0.5 : 0;
+    m.score = m.V <= 0 ? 0 : Math.max(0, Math.min(10, (m.prog == null ? m.base : 0.85 * m.base + 0.15 * m.prog) - m.trendPenalty));
+    m.band = bandOf(m.V, m.score);
   }
   const byId = Object.fromEntries(muscles.map((m) => [m.id, m]));
   const groups = GROUPS.map((g) => {
@@ -187,21 +213,20 @@ export function analyze(programs, exById) {
   const valid = checks.filter((c) => c.score !== null);
   const balance = valid.length ? valid.reduce((a, c) => a + c.score, 0) / valid.length : 0;
   const musclePart = wmean(muscles, 'score');
-  // πρόοδος φορτίου (addons/progress.js): όταν υπάρχει, μετράει 12% στον συνολικό βαθμό
-  const prog = typeof window !== 'undefined' ? window.__mxProg : null;
+  // πρόοδος φορτίου (addons/progress.js): μετράει μέσα στον βαθμό κάθε μυός (15%)· εδώ ο συνολικός δείκτης
   const overload = prog ? prog.overload(active, exById) : null;
   // ταίριασμα με το σώμα και τους στόχους (addons/body.js): όταν υπάρχουν στοιχεία, μετράει 10%
-  const bodyApi = typeof window !== 'undefined' ? window.__mxBody : null;
   const bodyFit = bodyApi && sessions.length ? bodyApi.fit({
     sessions: sessions.length, volume: wmean(muscles, 'vol'), overload: overload ? overload.score : null,
     maxSession: sessions.reduce((a, s) => Math.max(a, s.total), 0), groups,
   }) : null;
-  let overall = sessions.length ? (overload ? 0.75 * musclePart + 0.13 * balance + 0.12 * overload.score : 0.85 * musclePart + 0.15 * balance) : 0;
+  let overall = sessions.length ? (overload ? 0.87 * musclePart + 0.13 * balance : 0.85 * musclePart + 0.15 * balance) : 0;
   if (bodyFit) overall = 0.9 * overall + 0.1 * bodyFit.score;
 
   return {
     overload,
     bodyFit,
+    goal,
     sessions,
     weeklySessions: sessions.length,
     weeklySets: sessions.reduce((a, s) => a + s.total, 0),
