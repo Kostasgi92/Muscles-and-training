@@ -171,6 +171,22 @@ def('lunge', {
   },
 });
 
+// ===== Προβολές με δύο αλτήρες: στη θέση τους, εναλλάξ, με έναν αλτήρα σε κάθε χέρι
+def('db_lunge', {
+  view: { az: 76, el: 8 },
+  base: { y: 0.85, pitch: 0, sp: [-1, 0, 0], nk: [0, 0, 0], z: 0, fL: [0, 0, 0], fR: [0, 0, 0] },
+  keys: MOTIONS.lunge.keys,
+  seq: [['stand', 1.0, 0, { act: 'setup' }],
+    ['airL', 0.45, 1, { via: true, act: 'iso' }], ['landL', 0.45, 1, { act: 'iso' }], ['downL', 1.4, 1, { act: 'ecc', hold: 0.2 }], ['pushL', 0.7, 2, { act: 'con', via: true }], ['stand', 0.5, 2, { act: 'con', hold: 0.4 }],
+    ['airR', 0.45, 3, { via: true, act: 'iso' }], ['landR', 0.45, 3, { act: 'iso' }], ['downR', 1.4, 3, { act: 'ecc', hold: 0.2 }], ['pushR', 0.7, 3, { act: 'con', via: true }], ['stand', 0.5, 3, { act: 'con', hold: 0.4 }]],
+  loop: 1,
+  setup: (props, env) => dbPair(props, env),
+  pose(B, k, ctx) {
+    stand(B, k, { t: ctx.t, balance: false, softLegs: 0.008, feet: stepFeet, upper: (B) => hangArms(B), loads: () => dbLoads(B) });
+  },
+  update: dbUpdate,
+});
+
 // ===== Προβολές με περπάτημα (walking lunge): η κάμερα ακολουθεί
 def('walking_lunge', {
   view: { az: 76, el: 8 },
