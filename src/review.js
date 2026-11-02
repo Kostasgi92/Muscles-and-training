@@ -190,10 +190,18 @@ export function analyze(programs, exById) {
   // πρόοδος φορτίου (addons/progress.js): όταν υπάρχει, μετράει 12% στον συνολικό βαθμό
   const prog = typeof window !== 'undefined' ? window.__mxProg : null;
   const overload = prog ? prog.overload(active, exById) : null;
-  const overall = sessions.length ? (overload ? 0.75 * musclePart + 0.13 * balance + 0.12 * overload.score : 0.85 * musclePart + 0.15 * balance) : 0;
+  // ταίριασμα με το σώμα και τους στόχους (addons/body.js): όταν υπάρχουν στοιχεία, μετράει 10%
+  const bodyApi = typeof window !== 'undefined' ? window.__mxBody : null;
+  const bodyFit = bodyApi && sessions.length ? bodyApi.fit({
+    sessions: sessions.length, volume: wmean(muscles, 'vol'), overload: overload ? overload.score : null,
+    maxSession: sessions.reduce((a, s) => Math.max(a, s.total), 0), groups,
+  }) : null;
+  let overall = sessions.length ? (overload ? 0.75 * musclePart + 0.13 * balance + 0.12 * overload.score : 0.85 * musclePart + 0.15 * balance) : 0;
+  if (bodyFit) overall = 0.9 * overall + 0.1 * bodyFit.score;
 
   return {
     overload,
+    bodyFit,
     sessions,
     weeklySessions: sessions.length,
     weeklySets: sessions.reduce((a, s) => a + s.total, 0),
@@ -201,7 +209,7 @@ export function analyze(programs, exById) {
     byId,
     groups,
     checks,
-    sub: { volume: wmean(muscles, 'vol'), frequency: wmean(muscles, 'freq'), balance, overload: overload ? overload.score : 0 },
+    sub: { volume: wmean(muscles, 'vol'), frequency: wmean(muscles, 'freq'), balance, overload: overload ? overload.score : 0, goals: bodyFit ? bodyFit.score : null },
     overall,
     onTarget: muscles.filter((m) => m.V >= m.min && m.V <= RULES.excess).length,
   };
@@ -381,6 +389,25 @@ export function suggest(result, programs, exById) {
     const tips = window.__mxProg.tips(result.overload);
     if (tips.length) out.splice(Math.min(2, out.length), 0, ...tips);
   }
+  // 9. Σώμα και στόχοι (addons/body.js)
+  if (typeof window !== 'undefined' && window.__mxBody) {
+    const f = result.bodyFit;
+    const bt = window.__mxBody.tips({ sessions }, f).map((t) => {
+      if (!t.stag) return t;
+      // περιφέρεια που δεν μεγαλώνει: λίγος όγκος για τους μύες της → πρόσθεσε άσκηση
+      const low = t.stag.muscles.map((id) => result.byId[id]).filter((m) => m && m.V < RULES.max).sort((a, b) => a.V - b.V)[0];
+      const ex = low ? pick(low.id, 1)[0] : null;
+      return { ...t, muscle: low, text: t.text + ' ' + (low
+        ? T(`${low.name} get ${fmt(low.V)} sets a week. Add 2–4 sets and keep raising the load; also check that you eat enough.`, `Οι ${low.name.toLowerCase()} παίρνουν ${fmt(low.V)} σετ την εβδομάδα. Πρόσθεσε 2–4 σετ και συνέχισε να ανεβάζεις φορτίο· έλεγξε επίσης αν τρως αρκετά.`)
+        : T('The volume is already enough: progress the loads and eat enough.', 'Ο όγκος ήδη αρκεί: ανέβαζε φορτία και φρόντισε να τρως αρκετά.')), actions: ex ? [{ type: 'add', ex, sets: 3 }] : [] };
+    });
+    // λίγες προπονήσεις για τον στόχο → ίδιο πρόγραμμα περισσότερες φορές
+    if (f && f.reasons[0][0] < 9 && sessions < 4 && !out.some((x) => x.kind === 'frequency' && x.actions.length)) {
+      const p = programs.filter((x) => x.active).sort((a, b) => a.perWeek - b.perWeek)[0];
+      if (p) bt.unshift({ kind: 'body', title: T(`${window.__mxBody.TYPE[f.type][0]}: more workouts a week`, `${window.__mxBody.TYPE[f.type][0]}: περισσότερες προπονήσεις`), text: T(`For this goal ${f.type === 'cut' ? '3 or more' : '3–4'} workouts a week work best; you do ${sessions}.`, `Για αυτόν τον στόχο δουλεύουν καλύτερα ${f.type === 'cut' ? '3 ή περισσότερες' : '3–4'} προπονήσεις την εβδομάδα· κάνεις ${sessions}.`), actions: [{ type: 'perweek', program: p.id, n: p.perWeek + 1 }] });
+    }
+    out.splice(Math.min(3, out.length), 0, ...bt);
+  }
   return out;
 }
 
@@ -398,5 +425,9 @@ export function summaryText(result, programs, exById) {
     lines.push(T(`${m.name}: ${fmt(m.V)} sets/week, ${m.hits}×/week, score ${fmt(m.score)}`, `${m.name}: ${fmt(m.V)} σετ/εβδ., ${m.hits}×/εβδ., βαθμός ${fmt(m.score)}`));
   }
   if (typeof window !== 'undefined' && window.__mxProg) lines.push(...window.__mxProg.coachLines(result.overload));
+  if (typeof window !== 'undefined' && window.__mxBody) {
+    const bl = window.__mxBody.coachLines({ sessions: result.weeklySessions }, result.bodyFit);
+    if (bl.length) lines.push('', ...bl);
+  }
   return lines.join('\n');
 }

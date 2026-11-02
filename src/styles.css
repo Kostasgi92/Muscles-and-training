@@ -633,9 +633,9 @@ button { cursor: pointer; }
 .rv-ring small { color: var(--ink-2); font-size: .74rem; margin-top: 2px; }
 .rv-headtxt { min-width: 0; }
 .review .rv-headtxt h2 { font-size: 1.75rem; }
-.rv-subs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 16px; }
+.rv-subs { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-top: 16px; }
 @media (max-width: 480px) { .rv-subs { grid-template-columns: repeat(2, 1fr); } }
-.rv-subs > div { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px 10px; border-radius: 9px; background: var(--surface-2); }
+.rv-subs > div, .rv-subs > .rv-subbtn { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px 10px; border-radius: 9px; background: var(--surface-2); }
 .rv-subs span { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-2); }
 .rv-pill {
   display: inline-grid;
@@ -665,7 +665,9 @@ button { cursor: pointer; }
 .rv-track { height: 9px; border-radius: 5px; background: var(--surface-2); overflow: hidden; }
 .rv-track i { display: block; height: 100%; border-radius: 5px; min-width: 2px; }
 .rv-gbar b { text-align: right; font-variant-numeric: tabular-nums; }
-.rv-tabs { display: flex; gap: 4px; margin: 18px 0 12px; border-bottom: 1px solid var(--line); }
+.rv-tabs { display: flex; flex-wrap: wrap; gap: 0 2px; margin: 18px 0 12px; border-bottom: 1px solid var(--line); }
+.rv-subbtn { border: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.rv-subbtn:hover { outline: 1.5px solid var(--line); }
 .rv-tabs button {
   border: none;
   background: none;
@@ -676,6 +678,7 @@ button { cursor: pointer; }
   margin-bottom: -1px;
 }
 .rv-tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+@media (max-width: 480px) { .rv-tabs button { padding: 8px 9px; font-size: .9rem; } }
 .review .rv-tabpanel > .sub:first-child { margin-top: 0; }
 .rv-flash { margin: 12px 0 0; padding: 9px 12px; border-radius: 9px; background: color-mix(in srgb, #2fbf71 16%, var(--surface)); font-size: .88rem; }
 .rv-note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; padding: 10px 12px; border-radius: 9px; background: var(--second-soft); font-size: .88rem; }

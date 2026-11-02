@@ -126,6 +126,8 @@ Rules of the review: at least 10 hard sets per muscle group per week (optimal 10
 The analysis of the user's program:
 ${summary.slice(0, 12000)}
 
+If the analysis includes body data and goals (age, weight, body fat, muscle, measurements, goal type), judge the program for that goal and person, and mention them where relevant (for example calories or protein for fat loss or muscle gain, recovery with age).
+
 Write in English, briefly (at most 170 words), as plain text without tables or bold:
 - One sentence with your overall assessment.
 - The 3 most important changes, each with a specific exercise, number of sets and which session it goes in.
@@ -136,6 +138,8 @@ Put each point on its own line starting with "- ".`,
 
 Η ανάλυση του προγράμματος του χρήστη:
 ${summary.slice(0, 12000)}
+
+Αν η ανάλυση περιλαμβάνει στοιχεία σώματος και στόχους (ηλικία, βάρος, λίπος, μύες, περιφέρειες, είδος στόχου), κρίνε το πρόγραμμα για αυτόν τον στόχο και αυτό το άτομο και ανέφερέ τα όπου έχει σημασία (π.χ. θερμίδες ή πρωτεΐνη για απώλεια λίπους ή ανάπτυξη, αποκατάσταση ανάλογα με την ηλικία).
 
 Γράψε στα ελληνικά, σύντομα (έως 170 λέξεις), σε απλό κείμενο χωρίς πίνακες και χωρίς έντονα γράμματα:
 - Μία πρόταση με τη συνολική εκτίμηση.

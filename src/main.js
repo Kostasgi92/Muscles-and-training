@@ -923,6 +923,7 @@ function actionLabel(a, progs) {
     return T(`Do “${esc(p?.name)}” ${a.n}×/week`, `Κάνε το «${esc(p?.name)}» ${a.n}×/εβδ.`);
   }
   if (a.type === 'progress') return T('Open Progress tab', 'Άνοιξε την Πρόοδο');
+  if (a.type === 'tab') return a.id === 'goals' ? T('Open Goals', 'Άνοιξε τους Στόχους') : T('Open Body', 'Άνοιξε το Σώμα');
   return '';
 }
 
@@ -988,7 +989,7 @@ function renderReview({ fresh = false, ifChanged = false, scrollTo = null, focus
   const api = progApi();
   const ready = !!api && api.ready();
   const progs = ready ? reviewPrograms() : [];
-  const sig = JSON.stringify([ready, userProgram, window.__mxProg ? window.__mxProg.sig() : '', progs.map((p) => [p.id, p.name, p.perWeek, p.active, p.items.map((it) => [it.name, it.ex, it.sets])])]);
+  const sig = JSON.stringify([ready, userProgram, window.__mxProg ? window.__mxProg.sig() : '', window.__mxBody ? window.__mxBody.sig() : '', progs.map((p) => [p.id, p.name, p.perWeek, p.active, p.items.map((it) => [it.name, it.ex, it.sets])])]);
   if (ifChanged && !fresh && sig === rv.sig && $('#panel > article.review')) return;
   rv.sig = sig;
   if (ready && !rv.opened) {
@@ -1012,14 +1013,15 @@ function renderReview({ fresh = false, ifChanged = false, scrollTo = null, focus
     art.addEventListener('change', onReviewChange);
     art.addEventListener('submit', onReviewSubmit);
   }
-  const eyebrow = `<div class="eyebrow"><span>${T('Program review', 'Αξιολόγηση προγράμματος')}</span><span class="tag">${T('Goal: muscle growth', 'Στόχος: μυϊκή ανάπτυξη')}</span></div>`;
+  const goalName = window.__mxBody?.goalLabel({ sessions: result.weeklySessions }) || T('muscle growth', 'μυϊκή ανάπτυξη');
+  const eyebrow = `<div class="eyebrow"><span>${T('Program review', 'Αξιολόγηση προγράμματος')}</span><span class="tag">${T('Goal: ', 'Στόχος: ')}${esc(goalName.charAt(0).toLowerCase() + goalName.slice(1))}</span></div>`;
   if (!ready) {
     art.innerHTML = `${eyebrow}<h2>${T('Your programs', 'Τα προγράμματά σου')}</h2><div class="thinking"><i class="pulse"></i><span>${T('Loading your programs…', 'Φόρτωση των προγραμμάτων σου…')}</span></div>`;
     if (state.mode === 'review') applyModelState(false);
     return;
   }
   const ob = bandForScore(result.overall);
-  const tabs = [['programs', T('Programs', 'Προγράμματα')], ['muscles', T('Muscles', 'Μύες')], ['progress', T('Progress', 'Πρόοδος')], ['tips', T('Suggestions', 'Προτάσεις')]];
+  const tabs = [['programs', T('Programs', 'Προγράμματα')], ['muscles', T('Muscles', 'Μύες')], ['progress', T('Progress', 'Πρόοδος')], ['body', T('Body', 'Σώμα')], ['goals', T('Goals', 'Στόχοι')], ['tips', T('Suggestions', 'Προτάσεις')]];
   const nSess = result.weeklySessions;
   art.innerHTML = `
     ${eyebrow}
@@ -1036,6 +1038,7 @@ function renderReview({ fresh = false, ifChanged = false, scrollTo = null, focus
       <div><span>${T('Frequency', 'Συχνότητα')}</span>${pill(result.sub.frequency, bandForScore(result.sub.frequency))}</div>
       <div><span>${T('Balance', 'Ισορροπία')}</span>${pill(result.sub.balance, bandForScore(result.sub.balance))}</div>
       <div><span>${T('Progression', 'Πρόοδος φορτίου')}</span>${pill(result.sub.overload, bandForScore(result.sub.overload))}</div>
+      ${result.sub.goals != null ? `<button type="button" class="rv-subbtn" data-tab="goals" data-key="sub:goals"><span>${T('Goals', 'Στόχοι')}</span>${pill(result.sub.goals, bandForScore(result.sub.goals))}</button>` : ''}
     </div>
     <div class="rv-gbars">${result.groups.map((g) => `
       <button type="button" class="rv-gbar" data-group="${g.id}" data-key="g:${g.id}">
@@ -1045,7 +1048,7 @@ function renderReview({ fresh = false, ifChanged = false, scrollTo = null, focus
       </button>`).join('')}</div>
     <div class="rv-tabs" role="tablist" aria-label="${esc(T('Review', 'Αξιολόγηση'))}">${tabs.map(([id, name]) => `<button type="button" role="tab" id="rvtab-${id}" aria-selected="${rv.tab === id}" aria-controls="rvTabpanel" data-tab="${id}" data-key="tab:${id}">${name}</button>`).join('')}</div>
     <div class="rv-tabpanel" id="rvTabpanel" role="tabpanel" aria-labelledby="rvtab-${rv.tab}">
-      ${rv.tab === 'programs' ? tabPrograms(progs) : rv.tab === 'muscles' ? tabMuscles(result) : rv.tab === 'progress' ? '<div id="rvProg"></div>' : tabTips(result, progs)}
+      ${rv.tab === 'programs' ? tabPrograms(progs) : rv.tab === 'muscles' ? tabMuscles(result) : rv.tab === 'progress' ? '<div id="rvProg"></div>' : rv.tab === 'body' ? '<div id="rvBody"></div>' : rv.tab === 'goals' ? '<div id="rvGoals"></div>' : tabTips(result, progs)}
     </div>
     <details class="rv-method">
       <summary>${T('How the score works', 'Πώς βγαίνει ο βαθμός')}</summary>
@@ -1056,10 +1059,13 @@ function renderReview({ fresh = false, ifChanged = false, scrollTo = null, focus
         <li>${T('Distribution: up to about 10 sets for the same muscle in one session.', 'Κατανομή: έως ~10 σετ για τον ίδιο μυ σε μία προπόνηση.')}</li>
         <li>${T('Muscle score = 70% volume + 25% frequency + 5% distribution. Group score = average of its muscles, with the big muscles counting three times.', 'Βαθμός μυός = 70% όγκος + 25% συχνότητα + 5% κατανομή. Ομάδα = μέσος όρος των μυών της, με τους μεγάλους μύες να μετράνε τριπλά.')}</li>
         <li>${T('Overall score = 75% the muscles + 13% balance (push/pull, quads/hamstrings, upper/lower body) + 12% progressive overload.', 'Συνολικός βαθμός = 75% οι μύες + 13% ισορροπία (ώθηση/έλξη, τετρακέφαλοι/οπίσθιοι, άνω/κάτω σώμα) + 12% πρόοδος φορτίου.')}</li>
+        <li>${T('Goals: when you add your body data (Body tab), 10% of the score is how well the plan fits your goal (fat loss, muscle gain, recomposition or maintenance): workouts a week, volume and progression for that goal, and, once you have measurements over 2+ weeks, whether your weight is moving at a healthy pace toward it. Without goals, the focus is suggested from your measurements.', 'Στόχοι: όταν προσθέσεις στοιχεία σώματος (καρτέλα Σώμα), το 10% του βαθμού είναι πόσο ταιριάζει το πρόγραμμα στον στόχο σου (απώλεια λίπους, μυϊκή ανάπτυξη, ανασύνθεση ή διατήρηση): προπονήσεις την εβδομάδα, όγκος και πρόοδος φορτίου για αυτόν τον στόχο και, όταν υπάρχουν μετρήσεις 2+ εβδομάδων, αν το βάρος σου κινείται με υγιή ρυθμό προς αυτόν. Χωρίς στόχους, η κατεύθυνση προτείνεται από τις μετρήσεις σου.')}</li>
         <li>${T('Progressive overload: half of this score is how many of your exercises have a logged weight, the other half is whether you keep raising it. After 2 weeks at the same load you are ready to progress; after 4 weeks the lift counts as stalled. Log your levels in the Progress tab.', 'Πρόοδος φορτίου: το μισό του βαθμού είναι πόσες ασκήσεις έχουν καταγεγραμμένα κιλά και το άλλο μισό αν συνεχίζεις να τα ανεβάζεις. Μετά από 2 εβδομάδες με το ίδιο φορτίο είσαι έτοιμος να ανέβεις· μετά από 4 εβδομάδες η άσκηση θεωρείται κολλημένη. Κατάγραψε τα φορτία στην καρτέλα Πρόοδος.')}</li>
       </ul>
     </details>`;
   if (window.__mxProg && rv.tab === 'progress') window.__mxProg.mountTab(art.querySelector('#rvProg'), progs);
+  if (window.__mxBody && rv.tab === 'body') window.__mxBody.mountTab(art.querySelector('#rvBody'), { sessions: result.weeklySessions });
+  if (window.__mxBody && rv.tab === 'goals') window.__mxBody.mountGoals(art.querySelector('#rvGoals'), { sessions: result.weeklySessions }, result.bodyFit);
   rv.flash = '';
   if (fresh) panel().scrollTop = 0;
   else {
@@ -1136,6 +1142,7 @@ async function onReviewClick(e) {
   if ('coach' in d) { runCoach(); return; }
   if ('coachstop' in d) { cancelClaude(); return; }
   if (d.act) {
+    if (d.act === 'tab') { rv.tab = d.id; renderReview({ scrollTo: '#rvTabpanel' }); return; }
     if (d.act === 'progress') {
       rv.tab = 'progress';
       if (window.__mxProg) window.__mxProg.focus = d.ex;
