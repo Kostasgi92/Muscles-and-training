@@ -16,7 +16,14 @@
 
   /* ------------------------------------------------------------ store */
   const isDate = (s) => /^\d{4}-\d\d-\d\d$/.test(s || '');
-  const okSet = (s) => s && Number.isFinite(+s.kg) && +s.kg >= 0 && Number.isFinite(+s.reps) && +s.reps >= 1;
+  // σετ: {kg, reps} (κιλά × επαναλήψεις, kg 0 = σωματικό βάρος) ή {sec} (διάρκεια, π.χ. σανίδα)
+  const okSet = (s) => s && ((Number.isFinite(+s.sec) && +s.sec >= 1) || (Number.isFinite(+s.kg) && +s.kg >= 0 && Number.isFinite(+s.reps) && +s.reps >= 1));
+  const cleanSet = (s) => (Number.isFinite(+s.sec) && +s.sec >= 1 ? { sec: Math.round(+s.sec) } : { kg: Math.round(+s.kg * 100) / 100, reps: Math.round(+s.reps) });
+  // πώς μετριέται η πρόοδος: διάρκεια (ισομετρικές), επαναλήψεις με προαιρετικό βάρος (κοιλιακοί/κορμός), κιλά × επαναλήψεις
+  const TIME_EX = new Set(['plank', 'side_plank', 'hollow_hold', 'wall_sit', 'superman', 'stomach_vacuum']);
+  const REPS_EX = new Set(['crunch', 'sit_up', 'reverse_crunch', 'bicycle_crunch', 'hanging_leg_raise', 'lying_leg_raise', 'russian_twist', 'ab_wheel', 'dead_bug', 'bird_dog', 'mountain_climbers', 'hyperextension']);
+  const modeOf = (id) => (TIME_EX.has(id) ? 'time' : REPS_EX.has(id) ? 'reps' : 'load');
+  const isTime = (sets) => sets.some((x) => x.sec != null);
   // παλιά μορφή {kg, sets, reps} → ίδια σετ
   function upgrade(e) {
     if (!e || typeof e.ex !== 'string' || !isDate(e.since)) return null;
@@ -25,7 +32,7 @@
     if (!sets || !sets.length) return null;
     return {
       id: String(e.id || Math.random().toString(36).slice(2, 10)), ex: e.ex, pid: typeof e.pid === 'string' && e.pid ? e.pid : null,
-      since: e.since, at: +e.at || Date.now(), sets: sets.slice(0, 20).map((s) => ({ kg: Math.round(+s.kg * 100) / 100, reps: Math.round(+s.reps) })),
+      since: e.since, at: +e.at || Date.now(), sets: sets.slice(0, 20).map(cleanSet),
     };
   }
   let entries = [];
@@ -73,6 +80,7 @@
   // «60 kg × 10 / 10 / 9» όταν τα κιλά είναι ίδια, αλλιώς «60×10 · 57,5×8 kg»· σωματικό βάρος: «10 / 10 / 9 επ.»
   function setsText(sets) {
     if (!sets || !sets.length) return '';
+    if (isTime(sets)) return sets.map((s) => s.sec || 0).join(' / ') + T(' s', ' δευτερόλεπτα');
     const kgs = sets.map((s) => s.kg);
     if (kgs.every((k) => k === 0)) return sets.map((s) => s.reps).join(' / ') + ' ' + T('reps (bodyweight)', 'επ. (σωματικό βάρος)');
     if (kgs.every((k) => k === kgs[0])) return nk(kgs[0]) + ' kg × ' + sets.map((s) => s.reps).join(' / ');
@@ -89,18 +97,45 @@
   const hist = (key, pid) => entries.filter((e) => e.ex === key && (!e.pid || e.pid === pid))
     .sort((a, b) => (a.since < b.since ? -1 : a.since > b.since ? 1 : a.at - b.at));
   // μέτρο για «ανέβηκε;»: μέση εκτιμώμενη 1RM ανά σετ (Epley), για σωματικό βάρος οι επαναλήψεις
-  const power = (sets) => (sets.every((s) => s.kg === 0) ? sets.reduce((a, s) => a + s.reps, 0) / sets.length : sets.reduce((a, s) => a + s.kg * (1 + s.reps / 30), 0) / sets.length);
+  const power = (sets) => (isTime(sets) ? sets.reduce((a, s) => a + (s.sec || 0), 0) / sets.length : sets.every((s) => s.kg === 0) ? sets.reduce((a, s) => a + s.reps, 0) / sets.length : sets.reduce((a, s) => a + s.kg * (1 + s.reps / 30), 0) / sets.length);
+  // σύγκριση δύο επιπέδων (>0 ανέβηκε, <0 έπεσε). Κοιλιακοί/κορμός: πρώτα το βάρος, μετά οι επαναλήψεις
+  // (από σωματικό βάρος σε δίσκο είναι πρόοδος ακόμα κι αν πέφτουν οι επαναλήψεις)· αλλιώς το μέτρο power
+  function compare(a, b, mode) {
+    if (mode === 'reps' && !isTime(a) && !isTime(b)) {
+      const mk = (x) => Math.max(...x.map((s) => s.kg)), ar = (x) => x.reduce((t, s) => t + s.reps, 0) / x.length;
+      if (Math.abs(mk(a) - mk(b)) > 0.01) return mk(a) - mk(b);
+      return ar(a) - ar(b);
+    }
+    const pa = power(a), pb = power(b);
+    return Math.abs(pa - pb) <= pb * 0.002 + 1e-9 ? 0 : pa - pb;
+  }
   // ίδιος αριθμός σετ με το πρόγραμμα: κόβει ή επαναλαμβάνει το τελευταίο σετ
   const fit = (sets, n) => Array.from({ length: n }, (_, i) => ({ ...(sets[Math.min(i, sets.length - 1)] || { kg: 0, reps: 8 }) }));
 
-  // επόμενος στόχος για n σετ: +1 επανάληψη στα σετ, ή όταν όλα φτάνουν τις 10, +κιλά και −2 επαναλήψεις
-  function nextTarget(cur, n, ex) {
+  // επόμενος στόχος για n σετ → {sets, harder}
+  //  διάρκεια: +5 δευτ. ανά σετ έως τα 60· με 60 σε όλα τα σετ → δυσκολότερη παραλλαγή (harder)
+  //  επαναλήψεις (κοιλιακοί): +1 επανάληψη· με 20+ σε όλα τα σετ → βάρος ή δυσκολότερη παραλλαγή· με βάρος: στα 15 +2,5 kg
+  //  κιλά × επαναλήψεις: +1 επανάληψη, ή όταν όλα φτάνουν τις 10, +κιλά και −2 επαναλήψεις
+  function nextTarget(cur, n, ex, mode) {
     const s = fit(cur.sets, n);
-    const inc = isLower(ex) ? 5 : 2.5;
-    if (s.every((x) => x.kg === 0)) return s.map((x) => ({ kg: 0, reps: x.reps + 1 }));
+    if (mode === 'time' || isTime(s)) {
+      const minS = Math.min(...s.map((x) => x.sec || 0));
+      if (minS >= 60) return { sets: s.map((x) => ({ sec: x.sec })), harder: true };
+      return { sets: s.map((x) => ({ sec: Math.min(60, (x.sec || 0) + 5) })), harder: false };
+    }
     const minR = Math.min(...s.map((x) => x.reps));
-    if (minR >= 10) { const top = Math.max(...s.map((x) => x.kg)); return s.map(() => ({ kg: top + inc, reps: Math.max(6, minR - 2) })); }
-    return s.map((x) => ({ kg: x.kg, reps: x.reps + 1 }));
+    if (s.every((x) => x.kg === 0)) {
+      if (mode === 'reps' && minR >= 20) return { sets: s.map((x) => ({ kg: 0, reps: x.reps })), harder: true };
+      return { sets: s.map((x) => ({ kg: 0, reps: x.reps + 1 })), harder: false };
+    }
+    const top = Math.max(...s.map((x) => x.kg));
+    if (mode === 'reps') {
+      if (minR >= 15) return { sets: s.map(() => ({ kg: top + 2.5, reps: Math.max(8, minR - 3) })), harder: false };
+      return { sets: s.map((x) => ({ kg: x.kg, reps: x.reps + 1 })), harder: false };
+    }
+    const inc = isLower(ex) ? 5 : 2.5;
+    if (minR >= 10) return { sets: s.map(() => ({ kg: top + inc, reps: Math.max(6, minR - 2) })), harder: false };
+    return { sets: s.map((x) => ({ kg: x.kg, reps: x.reps + 1 })), harder: false };
   }
 
   // κατάσταση μιας άσκησης σε μία μέρα προπόνησης. occ = {pid, key, ex (id|null), sets (από το πρόγραμμα)}
@@ -111,8 +146,10 @@
     const days = daysSince(cur.since);
     const kind = days >= STALL_DAYS ? 'stalled' : days >= READY_DAYS ? 'ready' : 'fresh';
     const prev = h.length > 1 ? h[h.length - 2] : null;
-    const raised = !!prev && power(cur.sets) > power(prev.sets) * 1.002;
-    return { cur, prev, days, kind, raised, history: h, readyOn: READY_DAYS - days, target: nextTarget(cur, occ.sets, exOf(occ.ex)) };
+    const raised = !!prev && compare(cur.sets, prev.sets, modeOf(occ.ex)) > 0;
+    const mode = modeOf(occ.ex);
+    const t = nextTarget(cur, occ.sets, exOf(occ.ex), mode);
+    return { cur, prev, days, kind, raised, history: h, readyOn: READY_DAYS - days, target: t.sets, harder: t.harder, mode };
   }
   // 0…1: πόσο καλά προχωράει (null = χωρίς καταγραφή)
   function healthOf(st) { return !st ? null : st.raised || st.kind === 'fresh' ? 1 : st.kind === 'ready' ? 0.7 : st.days >= 42 ? 0.1 : 0.4; }
@@ -230,81 +267,120 @@
     if (open) det.open = true;
     const body = h('div');
     const dk = occ.pid + '|' + occ.key;
+    const mode = modeOf(occ.ex);
+    const blankRow = () => ({ kg: '', reps: '', sec: '', touched: false });
+    const rowOf = (x) => ({ kg: x.kg != null ? String(x.kg) : '', reps: x.reps != null ? String(x.reps) : '', sec: x.sec != null ? String(x.sec) : '', touched: false });
     function getDraft(st) {
       let d = drafts.get(dk);
       const n = occ.sets;
       if (!d) {
-        const base = st ? fit(st.cur.sets, n) : Array.from({ length: n }, () => ({ kg: '', reps: '' }));
-        d = { rows: base.map((s) => ({ kg: String(s.kg), reps: String(s.reps), touched: false })), since: today(), err: '' };
+        const base = st ? fit(st.cur.sets, n).map(rowOf) : Array.from({ length: n }, blankRow);
+        // κοιλιακοί: το βάρος εμφανίζεται μόνο αν το ενεργοποιήσεις (ή αν η τελευταία καταγραφή είχε βάρος)
+        d = { rows: base, since: today(), err: '', weighted: !!(st && !isTime(st.cur.sets) && st.cur.sets.some((x) => x.kg > 0)) };
         drafts.set(dk, d);
       }
       // ο αριθμός των σετ ακολουθεί πάντα την καρτέλα Προγράμματα
       if (d.rows.length !== n) {
-        const last = d.rows[d.rows.length - 1] || { kg: '', reps: '' };
-        d.rows = Array.from({ length: n }, (_, i) => d.rows[i] || { kg: last.kg, reps: last.reps, touched: false });
+        const last = d.rows[d.rows.length - 1] || blankRow();
+        d.rows = Array.from({ length: n }, (_, i) => d.rows[i] || { ...last, touched: false });
       }
       return d;
     }
     function render() {
       const ex = exOf(occ.ex);
       const st = status(occ);
-      const sum = h('summary', {}, T('Progression', 'Πρόοδος φορτίου'), h('span', { class: 'pg-fixed', text: `${occ.sets} ${setsWord(occ.sets)}` }),
+      const sum = h('summary', {}, T('Progression', 'Πρόοδος'), h('span', { class: 'pg-fixed', text: `${occ.sets} ${setsWord(occ.sets)}` }),
         st ? h('span', { class: 'pg-st ' + st.kind, text: stLabel[st.kind] }) : null);
       det.replaceChildren(sum, body);
       body.replaceChildren();
       const box = h('div', { class: 'pg-box' });
       if (st) {
         box.appendChild(h('p', { class: 'pg-cur', text: setsText(st.cur.sets) }));
-        box.appendChild(h('p', { class: 'pg-sub', text: T(`since ${fmtDate(st.cur.since)} · ${st.days} ${st.days === 1 ? 'day' : 'days'} at this level`, `από ${fmtDate(st.cur.since)} · ${st.days} ${st.days === 1 ? 'μέρα' : 'μέρες'} σε αυτό το φορτίο`) }));
+        box.appendChild(h('p', { class: 'pg-sub', text: T(`since ${fmtDate(st.cur.since)} · ${st.days} ${st.days === 1 ? 'day' : 'days'} at this level`, `από ${fmtDate(st.cur.since)} · ${st.days} ${st.days === 1 ? 'μέρα' : 'μέρες'} σε αυτό το επίπεδο`) }));
         if (st.cur.sets.length !== occ.sets) box.appendChild(h('p', { class: 'pg-sub', text: T(`Logged with ${st.cur.sets.length} ${setsWord(st.cur.sets.length)}; the Programs tab now has ${occ.sets}.`, `Καταγράφηκε με ${st.cur.sets.length} σετ· η καρτέλα Προγράμματα έχει τώρα ${occ.sets}.`) }));
         const tgt = setsText(st.target);
-        box.appendChild(h('p', { class: 'pg-next', text: st.kind === 'fresh'
-          ? T(`Stay here ${st.readyOn} more ${st.readyOn === 1 ? 'day' : 'days'}, then aim for ${tgt}.`, `Μείνε εδώ ακόμα ${st.readyOn} ${st.readyOn === 1 ? 'μέρα' : 'μέρες'} και μετά στόχευσε ${tgt}.`)
-          : st.kind === 'ready'
-            ? T(`Time to progress if every set felt clean: ${tgt}.`, `Ώρα να ανέβεις αν όλα τα σετ ήταν καθαρά: ${tgt}.`)
-            : T(`No change for ${st.days} days. Move up to ${tgt}, or deload and rebuild.`, `Καμία αλλαγή εδώ και ${st.days} μέρες. Ανέβα σε ${tgt} ή κάνε ελαφριά εβδομάδα και ξαναχτίσε.`) }));
+        let next;
+        if (st.harder) {
+          next = mode === 'time' || isTime(st.cur.sets)
+            ? T('You hold 60 seconds on every set: instead of longer holds, move to a harder variation (side plank, feet on a bench, or hands further forward).', 'Κρατάς 60 δευτερόλεπτα σε κάθε σετ: αντί για μεγαλύτερη διάρκεια, πέρασε σε δυσκολότερη παραλλαγή (πλάγια σανίδα, πόδια σε πάγκο ή χέρια πιο μπροστά).')
+            : T('20+ reps on every set: add weight (switch on “Add weight” below) or move to a harder variation.', '20+ επαναλήψεις σε κάθε σετ: πρόσθεσε βάρος (ενεργοποίησε «Με επιπλέον βάρος» παρακάτω) ή πέρασε σε δυσκολότερη παραλλαγή.');
+        } else {
+          next = st.kind === 'fresh'
+            ? T(`Stay here ${st.readyOn} more ${st.readyOn === 1 ? 'day' : 'days'}, then aim for ${tgt}.`, `Μείνε εδώ ακόμα ${st.readyOn} ${st.readyOn === 1 ? 'μέρα' : 'μέρες'} και μετά στόχευσε ${tgt}.`)
+            : st.kind === 'ready'
+              ? T(`Time to progress if every set felt clean: ${tgt}.`, `Ώρα να ανέβεις αν όλα τα σετ ήταν καθαρά: ${tgt}.`)
+              : T(`No change for ${st.days} days. Move up to ${tgt}, or take an easier week and rebuild.`, `Καμία αλλαγή εδώ και ${st.days} μέρες. Ανέβα σε ${tgt} ή κάνε μια ελαφριά εβδομάδα και ξαναχτίσε.`);
+        }
+        box.appendChild(h('p', { class: 'pg-next', text: next }));
       } else {
-        box.appendChild(h('p', { class: 'pg-sub', text: T('No level logged yet. Add the weight and reps of each set you do now, and the day you started with them.', 'Δεν υπάρχει καταγραφή. Πρόσθεσε τα κιλά και τις επαναλήψεις κάθε σετ που κάνεις τώρα και την ημέρα που ξεκίνησες.') }));
+        box.appendChild(h('p', { class: 'pg-sub', text: mode === 'time'
+          ? T('No level logged yet. Add how many seconds you hold each set now, and the day you started.', 'Δεν υπάρχει καταγραφή. Πρόσθεσε πόσα δευτερόλεπτα κρατάς σε κάθε σετ τώρα και την ημέρα που ξεκίνησες.')
+          : mode === 'reps'
+            ? T('No level logged yet. Add the reps of each set you do now, and the day you started.', 'Δεν υπάρχει καταγραφή. Πρόσθεσε τις επαναλήψεις κάθε σετ που κάνεις τώρα και την ημέρα που ξεκίνησες.')
+            : T('No level logged yet. Add the weight and reps of each set you do now, and the day you started with them.', 'Δεν υπάρχει καταγραφή. Πρόσθεσε τα κιλά και τις επαναλήψεις κάθε σετ που κάνεις τώρα και την ημέρα που ξεκίνησες.') }));
       }
       const d = getDraft(st);
       const uid = 'pg' + Math.random().toString(36).slice(2, 7);
+      const showKg = mode === 'load' || (mode === 'reps' && d.weighted);
+      const inp = (r, i, field, attrs, label) => h('input', Object.assign({ id: `${uid}${field}${i}`, type: 'number', value: r[field], 'aria-label': label,
+        oninput: (e) => { r[field] = e.target.value; r.touched = true; if (i === 0) mirror(field); } }, attrs));
       const rows = d.rows.map((r, i) => {
-        const kgIn = h('input', { id: `${uid}k${i}`, type: 'number', min: '0', step: '0.25', inputmode: 'decimal', value: r.kg, 'aria-label': T(`Set ${i + 1} weight (kg)`, `Σετ ${i + 1} βάρος (kg)`),
-          oninput: (e) => { r.kg = e.target.value; r.touched = true; if (i === 0) mirror('kg'); } });
-        const repIn = h('input', { id: `${uid}r${i}`, type: 'number', min: '1', step: '1', inputmode: 'numeric', value: r.reps, 'aria-label': T(`Set ${i + 1} reps`, `Σετ ${i + 1} επαναλήψεις`),
-          oninput: (e) => { r.reps = e.target.value; r.touched = true; if (i === 0) mirror('reps'); } });
-        return h('div', { class: 'pg-set' }, h('span', { class: 'pg-setn', text: T(`Set ${i + 1}`, `Σετ ${i + 1}`) }), kgIn, h('span', { class: 'pg-x', text: 'kg ×' }), repIn, h('span', { class: 'pg-x', text: T('reps', 'επ.') }));
+        const n = h('span', { class: 'pg-setn', text: T(`Set ${i + 1}`, `Σετ ${i + 1}`) });
+        if (mode === 'time') return h('div', { class: 'pg-set one' }, n, inp(r, i, 'sec', { min: '1', step: '1', inputmode: 'numeric' }, T(`Set ${i + 1} seconds`, `Σετ ${i + 1} δευτερόλεπτα`)), h('span', { class: 'pg-x', text: T('seconds', 'δευτ.') }));
+        const repIn = inp(r, i, 'reps', { min: '1', step: '1', inputmode: 'numeric' }, T(`Set ${i + 1} reps`, `Σετ ${i + 1} επαναλήψεις`));
+        if (!showKg) return h('div', { class: 'pg-set one' }, n, repIn, h('span', { class: 'pg-x', text: T('reps', 'επ.') }));
+        return h('div', { class: 'pg-set' }, n, inp(r, i, 'kg', { min: '0', step: '0.25', inputmode: 'decimal' }, T(`Set ${i + 1} weight (kg)`, `Σετ ${i + 1} βάρος (kg)`)), h('span', { class: 'pg-x', text: 'kg ×' }), repIn, h('span', { class: 'pg-x', text: T('reps', 'επ.') }));
       });
       // τα σετ που δεν άγγιξες ακολουθούν το 1ο σετ
       function mirror(field) {
         d.rows.forEach((r, i) => {
           if (i === 0 || r.touched) return;
           r[field] = d.rows[0][field];
-          const inp = body.querySelector(`#${uid}${field === 'kg' ? 'k' : 'r'}${i}`);
-          if (inp) inp.value = r[field];
+          const el = body.querySelector(`#${uid}${field}${i}`);
+          if (el) el.value = r[field];
         });
       }
+      const weightToggle = mode === 'reps' ? h('label', { class: 'pg-wt' },
+        h('input', { type: 'checkbox', checked: d.weighted, onchange: (e) => { d.weighted = e.target.checked; render(); } }),
+        h('span', { text: T('Add weight (e.g. a plate on your chest)', 'Με επιπλέον βάρος (π.χ. δίσκος στο στήθος)') })) : null;
       const dateIn = h('input', { id: uid + 'd', type: 'date', value: d.since, max: today(), oninput: (e) => { d.since = e.target.value; } });
+      const num = (v) => Number(String(v).replace(',', '.'));
       const form = h('form', { class: 'pg-form', novalidate: true, onsubmit: (e) => {
         e.preventDefault();
-        const sets = d.rows.map((r) => ({ kg: Number(String(r.kg).replace(',', '.')), reps: Number(r.reps) }));
-        if (d.rows.some((r) => r.kg === '' || r.reps === '') || sets.some((s) => !(s.kg >= 0) || !(s.reps >= 1))) { d.err = T('Enter kilos (0 for bodyweight) and reps for every set, and the start date.', 'Συμπλήρωσε κιλά (0 για σωματικό βάρος) και επαναλήψεις σε κάθε σετ και την ημερομηνία έναρξης.'); render(); return; }
+        let sets, bad;
+        if (mode === 'time') {
+          sets = d.rows.map((r) => ({ sec: num(r.sec) }));
+          bad = d.rows.some((r) => r.sec === '') || sets.some((x) => !(x.sec >= 1));
+          if (bad) d.err = T('Enter the seconds of every set and the start date.', 'Συμπλήρωσε τα δευτερόλεπτα κάθε σετ και την ημερομηνία έναρξης.');
+        } else if (!showKg) {
+          sets = d.rows.map((r) => ({ kg: 0, reps: num(r.reps) }));
+          bad = d.rows.some((r) => r.reps === '') || sets.some((x) => !(x.reps >= 1));
+          if (bad) d.err = T('Enter the reps of every set and the start date.', 'Συμπλήρωσε τις επαναλήψεις κάθε σετ και την ημερομηνία έναρξης.');
+        } else {
+          sets = d.rows.map((r) => ({ kg: num(r.kg), reps: num(r.reps) }));
+          bad = d.rows.some((r) => r.kg === '' || r.reps === '') || sets.some((x) => !(x.kg >= 0) || !(x.reps >= 1));
+          if (bad) d.err = T('Enter kilos (0 for bodyweight) and reps for every set, and the start date.', 'Συμπλήρωσε κιλά (0 για σωματικό βάρος) και επαναλήψεις σε κάθε σετ και την ημερομηνία έναρξης.');
+        }
+        if (bad) { render(); return; }
         if (!isDate(d.since) || d.since > today()) { d.err = T('The start date cannot be in the future.', 'Η ημερομηνία έναρξης δεν μπορεί να είναι στο μέλλον.'); render(); return; }
-        add(occ, sets, d.since);
-        drafts.set(dk, { rows: sets.map((s) => ({ kg: String(s.kg), reps: String(s.reps), touched: false })), since: today(), err: '' });
+        // πρώτα το νέο πρόχειρο: η αποθήκευση ξαναζωγραφίζει αμέσως την καρτέλα
+        const since = d.since;
+        drafts.set(dk, { rows: sets.map(rowOf), since: today(), err: '', weighted: d.weighted });
+        add(occ, sets, since);
       } },
-        h('p', { class: 'pg-fixednote', text: T(`${occ.sets} ${setsWord(occ.sets)}, as in the Programs tab`, `${occ.sets} σετ, όπως στην καρτέλα Προγράμματα`) }),
+        h('p', { class: 'pg-fixednote', text: (mode === 'time' ? T(`${occ.sets} ${setsWord(occ.sets)} in seconds`, `${occ.sets} σετ σε δευτερόλεπτα`) : mode === 'reps' && !showKg ? T(`${occ.sets} ${setsWord(occ.sets)} × reps`, `${occ.sets} σετ × επαναλήψεις`) : T(`${occ.sets} ${setsWord(occ.sets)}`, `${occ.sets} σετ`)) + T(', as in the Programs tab', ', όπως στην καρτέλα Προγράμματα') }),
+        weightToggle,
         h('div', { class: 'pg-sets' }, rows),
-        h('div', { class: 'pg-date' }, h('label', { for: uid + 'd', text: T('Started lifting this on', 'Ξεκίνησα με αυτό στις') }), dateIn),
-        h('button', { class: 'btn primary', type: 'submit', text: st ? T('Save new level', 'Αποθήκευση νέου φορτίου') : T('Save level', 'Αποθήκευση φορτίου') }));
+        h('div', { class: 'pg-date' }, h('label', { for: uid + 'd', text: T('Started this on', 'Ξεκίνησα με αυτό στις') }), dateIn),
+        h('button', { class: 'btn primary', type: 'submit', text: st ? T('Save new level', 'Αποθήκευση νέου επιπέδου') : T('Save level', 'Αποθήκευση επιπέδου') }));
       box.appendChild(form);
       if (d.err) { box.appendChild(h('p', { class: 'pg-err', role: 'alert', text: d.err })); d.err = ''; }
-      box.appendChild(h('p', { class: 'pg-hint', text: T(`Add a new level each time you move up. After ${READY_DAYS} days at one level the app tells you it is time to progress.`, `Πρόσθεσε νέο φορτίο κάθε φορά που ανεβαίνεις. Μετά από ${READY_DAYS} μέρες στο ίδιο φορτίο η εφαρμογή σου λέει πότε να ανέβεις.`) }));
+      box.appendChild(h('p', { class: 'pg-hint', text: T(`Add a new level each time you move up. After ${READY_DAYS} days at one level the app tells you it is time to progress.`, `Πρόσθεσε νέο επίπεδο κάθε φορά που ανεβαίνεις. Μετά από ${READY_DAYS} μέρες στο ίδιο επίπεδο η εφαρμογή σου λέει πότε να ανέβεις.`) }));
       if (st) {
         const items = st.history.slice().reverse().map((e, i, arr) => {
           const prev = arr[i + 1];
           let chg = '';
-          if (prev) { const dp = power(e.sets) - power(prev.sets); chg = Math.abs(dp) < 0.05 ? '' : dp > 0 ? '▲' : '▼'; }
+          if (prev) { const dp = compare(e.sets, prev.sets, mode); chg = Math.abs(dp) < 0.05 ? '' : dp > 0 ? '▲' : '▼'; }
           return h('li', {}, h('span', { class: 'd', text: fmtDate(e.since) }), h('span', { class: 'v', text: setsText(e.sets) + (e.pid ? '' : T(' · all days', ' · όλες οι μέρες')) }), h('span', { class: 'chg', text: chg }),
             h('button', { type: 'button', 'aria-label': T('Delete this entry', 'Διαγραφή καταχώρησης'), onclick: () => remove(e.id), text: '×' }));
         });
@@ -338,6 +414,9 @@
 .pg-fixednote{margin:0 0 6px;font-size:.78rem;color:var(--ink-2);font-weight:600}
 .pg-sets{display:grid;gap:6px}
 .pg-set{display:grid;grid-template-columns:52px minmax(0,1fr) auto minmax(0,1fr) auto;align-items:center;gap:6px}
+.pg-set.one{grid-template-columns:52px minmax(0,140px) auto}
+.pg-wt{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:.84rem;cursor:pointer}
+.pg-form .pg-wt input{width:16px;height:16px;flex:none;padding:0;accent-color:var(--accent);margin:0}
 .pg-setn{font-size:.78rem;color:var(--ink-2);font-weight:600}
 .pg-x{font-size:.76rem;color:var(--ink-2)}
 .pg-form input{width:100%;min-width:0;padding:8px 10px;border-radius:8px;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);font-size:.95rem}
