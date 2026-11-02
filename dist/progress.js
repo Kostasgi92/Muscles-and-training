@@ -138,6 +138,104 @@
     return { sets: s.map((x) => ({ kg: x.kg, reps: x.reps + 1 })), harder: false };
   }
 
+  /* ------------------------------------------------------------ αρχικό βάρος όταν δεν υπάρχει καταγραφή */
+  // Κιλά για ένα σετ εργασίας 10–12 επαναλήψεων με 2–3 επαναλήψεις «στο ρεζερβουάρ», ως κλάσμα του σωματικού βάρους
+  // ενός αρχάριου/μέσου άνδρα (συντηρητικά, ~55–65% των προτύπων δύναμης). bb = μπάρα (σύνολο), db = ανά αλτήρα
+  // (one: ένας αλτήρας), mc = μηχάνημα/τροχαλία, kb = kettlebell. Ασκήσεις σωματικού βάρους: επαναλήψεις ή δευτερόλεπτα.
+  const START = {
+    bench_press: [0.5, 'bb'], incline_bench: [0.42, 'bb'], decline_bench: [0.5, 'bb'], close_grip_bench: [0.42, 'bb'],
+    db_bench: [0.17, 'db'], db_incline: [0.15, 'db'], machine_chest_press: [0.5, 'mc'], db_fly: [0.08, 'db'], cable_crossover: [0.1, 'mc'],
+    pec_deck: [0.4, 'mc'], pec_deck_bent: [0.35, 'mc'], pullover: [0.18, 'db', 1], ohp: [0.3, 'bb'], db_shoulder_press: [0.12, 'db'],
+    arnold_press: [0.1, 'db'], lateral_raise: [0.05, 'db', 0, '12–15'], front_raise: [0.06, 'db', 0, '12–15'], rear_delt_fly: [0.04, 'db', 0, '12–15'],
+    face_pull: [0.2, 'mc', 0, '12–15'], upright_row: [0.3, 'bb'], scaption: [0.04, 'db', 0, '12–15'], shrug: [0.3, 'db'], y_raise: [0.03, 'db', 0, '12–15'],
+    deadlift: [0.8, 'bb', 0, '6–8'], rdl: [0.6, 'bb', 0, '8–10'], sumo_deadlift: [0.8, 'bb', 0, '6–8'], lat_pulldown: [0.55, 'mc'], barbell_row: [0.45, 'bb'],
+    db_row: [0.22, 'db', 1], seated_cable_row: [0.5, 'mc'], t_bar_row: [0.4, 'bb'], straight_arm_pulldown: [0.2, 'mc'], good_morning: [0.3, 'bb'],
+    barbell_curl: [0.22, 'ez'], db_curl: [0.1, 'db'], hammer_curl: [0.11, 'db'], preacher_curl: [0.2, 'ez'], incline_curl: [0.08, 'db'],
+    concentration_curl: [0.08, 'db', 1], concentration_curl_l: [0.08, 'db', 1], reverse_curl: [0.18, 'ez'], skull_crusher: [0.22, 'ez'],
+    cable_pushdown: [0.25, 'mc'], overhead_triceps: [0.15, 'db', 1], kickback: [0.05, 'db', 0, '12–15'], wrist_curl: [0.2, 'ez', 0, '12–15'], reverse_wrist_curl: [0.1, 'ez', 0, '12–15'],
+    squat: [0.65, 'bb', 0, '8–10'], front_squat: [0.5, 'bb', 0, '8–10'], goblet_squat: [0.2, 'db', 1], bulgarian_split_squat: [0.1, 'db'], db_lunge: [0.12, 'db'],
+    walking_lunge: [0.12, 'db'], leg_press: [1.3, 'mc'], hack_squat: [0.6, 'mc'], leg_extension: [0.4, 'mc', 0, '12–15'], lying_leg_curl: [0.3, 'mc'],
+    seated_leg_curl: [0.35, 'mc'], hip_thrust: [0.7, 'bb'], cable_kickback: [0.1, 'mc', 0, '12–15'], hip_abduction: [0.45, 'mc', 0, '12–15'], hip_adduction: [0.45, 'mc', 0, '12–15'],
+    single_leg_rdl: [0.12, 'db', 1], kettlebell_swing: [0.2, 'kb', 0, '15'], power_clean: [0.4, 'bb', 0, '3–5'], calf_raise: [0.7, 'mc', 0, '12–15'], seated_calf_raise: [0.4, 'mc', 0, '12–15'],
+    pallof_press: [0.1, 'mc'], woodchop: [0.12, 'mc'], side_bend: [0.2, 'db', 1, '12–15'], suitcase_carry: [0.3, 'db', 1, '30–40 s'],
+  };
+  const START_BW = {
+    push_up: { reps: 10 }, dips: { reps: 6 }, pull_up: { reps: 4 }, chin_up: { reps: 5 }, inverted_row: { reps: 8 }, bench_dips: { reps: 10 }, scap_push_up: { reps: 10 },
+    hyperextension: { reps: 12 }, lunge: { reps: 10 }, lateral_lunge: { reps: 10 }, step_up: { reps: 10 }, ball_leg_curl: { reps: 10 }, nordic_curl: { reps: 4 },
+    glute_bridge: { reps: 15 }, fire_hydrant: { reps: 15 }, tibialis_raise: { reps: 15 }, hand_gripper: { reps: 15 }, neck_flexion: { reps: 15 }, neck_extension: { reps: 15 },
+    crunch: { reps: 15 }, sit_up: { reps: 12 }, reverse_crunch: { reps: 12 }, bicycle_crunch: { reps: 16 }, hanging_leg_raise: { reps: 8 }, lying_leg_raise: { reps: 12 },
+    russian_twist: { reps: 20 }, ab_wheel: { reps: 6 }, dead_bug: { reps: 10 }, bird_dog: { reps: 10 }, mountain_climbers: { reps: 20 },
+    plank: { sec: 30 }, side_plank: { sec: 20 }, hollow_hold: { sec: 20 }, wall_sit: { sec: 30 }, superman: { sec: 20 }, stomach_vacuum: { sec: 15 }, short_foot: { sec: 20 },
+    ext_rotation: { band: 15 }, int_rotation: { band: 15 }, band_pull_apart: { band: 15 }, clamshell: { band: 15 }, monster_walk: { band: 12 }, ankle_eversion: { band: 15 },
+  };
+  const roundTo = (x, step) => Math.round(x / step) * step;
+  // προσωπικός συντελεστής από ό,τι έχεις ήδη καταγράψει: πόσο πιο δυνατός/αδύναμος είσαι από την πρόβλεψη (διάμεσος)
+  function personalFactor(base) {
+    const r = [];
+    const seen = new Set();
+    entries.slice().reverse().forEach((e) => {
+      if (seen.has(e.ex) || !START[e.ex] || isTime(e.sets)) return;
+      seen.add(e.ex);
+      const top = Math.max(...e.sets.map((x) => x.kg || 0));
+      const pred = base(e.ex);
+      if (top > 0 && pred > 0) r.push(top / pred);
+    });
+    if (r.length < 2) return 1;
+    r.sort((a, b) => a - b);
+    return clamp(r[Math.floor(r.length / 2)], 0.6, 1.6);
+  }
+  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+  // πρόταση για μία άσκηση → {text, kg?} ή null (χωρίς σωματικό βάρος)
+  function starterFor(exId, nSets) {
+    const B = window.__mxBody && window.__mxBody.metrics ? window.__mxBody.metrics(0) : null;
+    const bw0 = B && B.W ? B.W.v : null;
+    const sets = nSets ? `${nSets} ${setsWord(nSets)}` : '';
+    const bwx = START_BW[exId];
+    if (bwx) {
+      if (bwx.sec) return { text: T(`${sets ? sets + ' × ' : ''}${bwx.sec} s, building up by 5 s`, `${sets ? sets + ' × ' : ''}${bwx.sec} δευτερόλεπτα, ανεβαίνοντας κατά 5`) };
+      if (bwx.band) return { text: T(`${sets ? sets + ' × ' : ''}${bwx.band} reps with a light band`, `${sets ? sets + ' × ' : ''}${bwx.band} επαναλήψεις με ελαφρύ λάστιχο`) };
+      return { text: T(`${sets ? sets + ' × ' : ''}${bwx.reps} reps with your bodyweight`, `${sets ? sets + ' × ' : ''}${bwx.reps} επαναλήψεις με το σωματικό βάρος`) };
+    }
+    const row = START[exId];
+    if (!row || !bw0) return null;
+    const ex = exOf(exId);
+    const lower = isLower(ex);
+    const sex = B.sex, age = B.age || 30;
+    // τα πολύ βαριά σώματα δεν είναι αναλογικά πιο δυνατά
+    const bw = bw0 <= 90 ? bw0 : 90 + (bw0 - 90) * 0.5;
+    const ageF = age >= 60 ? 0.75 : age >= 50 ? 0.85 : age >= 40 ? 0.92 : 1;
+    const sexF = sex === 'f' ? (lower ? 0.7 : 0.55) : 1;
+    const base = (id) => { const r = START[id]; const e2 = exOf(id); return r ? r[0] * bw * ageF * (sex === 'f' ? (isLower(e2) ? 0.7 : 0.55) : 1) : 0; };
+    const kg0 = row[0] * bw * ageF * sexF * personalFactor(base);
+    const [, kind, one, rr = '10–12'] = row;
+    let kg, what;
+    if (kind === 'bb') { kg = Math.max(20, roundTo(kg0, 2.5)); what = T(`~${nk(kg)} kg on the bar`, `~${nk(kg)} kg με τη μπάρα`); }
+    else if (kind === 'ez') { kg = Math.max(10, roundTo(kg0, 2.5)); what = T(`~${nk(kg)} kg on the bar`, `~${nk(kg)} kg με τη μπάρα`); }
+    else if (kind === 'mc') { kg = Math.max(5, roundTo(kg0, 2.5)); what = T(`~${nk(kg)} kg on the machine`, `~${nk(kg)} kg στο μηχάνημα`); }
+    else if (kind === 'kb') { kg = Math.max(8, roundTo(kg0, 4)); what = T(`a ~${kg} kg kettlebell`, `kettlebell ~${kg} kg`); }
+    else { kg = Math.max(2, kg0 < 10 ? Math.round(kg0) : roundTo(kg0, 2)); what = one ? T(`a ~${nk(kg)} kg dumbbell`, `αλτήρας ~${nk(kg)} kg`) : T(`~${nk(kg)} kg dumbbells`, `αλτήρες ~${nk(kg)} kg`); }
+    const reps = /s$/.test(rr) ? rr : T(`${rr} reps`, `${rr} επαναλήψεις`);
+    return { kg, text: `${what} · ${sets ? sets + ' × ' : ''}${reps}` };
+  }
+  // όλες οι ασκήσεις των προγραμμάτων χωρίς καταγραφή, με πρόταση αρχικού φορτίου
+  function starters(programs) {
+    const out = [];
+    occurrences(programs).forEach((o) => {
+      if (!o.ex || status(o)) return;
+      const ex = exOf(o.ex);
+      // η ίδια άσκηση είναι ήδη καταγεγραμμένη σε άλλη μέρα: ξεκίνα από εκεί
+      const other = entries.filter((e) => e.ex === o.ex).sort((a, b) => (a.since < b.since ? -1 : a.since > b.since ? 1 : a.at - b.at)).pop();
+      if (other) {
+        const day = (programs || []).find((p) => p.id === other.pid);
+        out.push({ ex: o.ex, pid: o.pid, day: o.program.name, name: ex ? exName(ex) : o.name, text: (day ? T(`as on ${day.name}: `, `όπως στο ${day.name}: `) : T('as you logged it: ', 'όπως το κατέγραψες: ')) + setsText(fit(other.sets, o.sets)) });
+        return;
+      }
+      const st = starterFor(o.ex, o.sets);
+      if (st) out.push({ ex: o.ex, pid: o.pid, day: o.program.name, name: ex ? exName(ex) : o.name, text: st.text });
+    });
+    return out;
+  }
+
   // κατάσταση μιας άσκησης σε μία μέρα προπόνησης. occ = {pid, key, ex (id|null), sets (από το πρόγραμμα)}
   function status(occ) {
     const h = hist(occ.key, occ.pid);
@@ -313,6 +411,8 @@
         }
         box.appendChild(h('p', { class: 'pg-next', text: next }));
       } else {
+        const sg = occ.ex ? starterFor(occ.ex, occ.sets) : null;
+        if (sg) box.appendChild(h('p', { class: 'pg-next pg-start', text: T('Suggested start: ', 'Πρόταση για αρχή: ') + sg.text + '.' }));
         box.appendChild(h('p', { class: 'pg-sub', text: mode === 'time'
           ? T('No level logged yet. Add how many seconds you hold each set now, and the day you started.', 'Δεν υπάρχει καταγραφή. Πρόσθεσε πόσα δευτερόλεπτα κρατάς σε κάθε σετ τώρα και την ημέρα που ξεκίνησες.')
           : mode === 'reps'
@@ -410,6 +510,7 @@
 .pg-cur{font-size:1.05rem;font-weight:700;margin:0;font-variant-numeric:tabular-nums}
 .pg-sub{margin:2px 0 0;font-size:.84rem;color:var(--ink-2)}
 .pg-next{margin:8px 0 0;font-size:.88rem}
+.pg-start{margin:0 0 6px;font-weight:600}
 .pg-form{margin-top:12px}
 .pg-fixednote{margin:0 0 6px;font-size:.78rem;color:var(--ink-2);font-weight:600}
 .pg-sets{display:grid;gap:6px}
@@ -500,6 +601,6 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 
-  const api = { overload, tips, coachLines, sig, mountTab, status, health, occurrences, add, remove, refreshCards, focus: null, onChange: (f) => listeners.push(f), entries: () => entries.slice(), setsText };
+  const api = { starters, starterFor, overload, tips, coachLines, sig, mountTab, status, health, occurrences, add, remove, refreshCards, focus: null, onChange: (f) => listeners.push(f), entries: () => entries.slice(), setsText };
   window.__mxProg = api;
 })();

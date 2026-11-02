@@ -43,7 +43,9 @@ export const SCORED = [
   { id: 'brachialis', name: T('Brachialis', 'Βραχιόνιος'), full: T('Brachialis & brachioradialis', 'Βραχιόνιος & βραχιονοκερκιδικός'), group: 'arms', w: 1, ids: ['brachialis', 'brachioradialis'] },
   { id: 'triceps', name: T('Triceps', 'Τρικέφαλοι'), full: T('Triceps brachii', 'Τρικέφαλος βραχιόνιος'), group: 'arms', w: 3, ids: ['triceps'] },
   { id: 'forearms', name: T('Forearms', 'Πήχεις'), full: T('Forearm flexors & extensors', 'Καμπτήρες & εκτείνοντες αντιβραχίου'), group: 'arms', w: 1, ids: ['forearm_flex', 'forearm_ext', 'hand'] },
-  { id: 'abs', name: T('Abs', 'Κοιλιακοί'), full: T('Rectus abdominis', 'Ορθός κοιλιακός'), group: 'core', w: 2, ids: ['rectus_abd'] },
+  // κοιλιακοί: μετράει μόνο η άμεση δουλειά (τα βαριά πολυαρθρικά τους κρατούν, δεν τους μεγαλώνουν), 8–16 σετ
+  // την εβδομάδα σε 2+ προπονήσεις, έως ~8 σετ σε μία (αναρρώνουν γρήγορα· η συχνότητα μετράει λιγότερο από τον όγκο)
+  { id: 'abs', name: T('Abs', 'Κοιλιακοί'), full: T('Rectus abdominis', 'Ορθός κοιλιακός'), group: 'core', w: 2, ids: ['rectus_abd'], direct: true, min: 8, max: 16, cap: 8 },
   { id: 'obliques', name: T('Obliques & deep core', 'Λοξοί & βαθύς κορμός'), full: T('Obliques, transversus abdominis, quadratus lumborum', 'Λοξοί, εγκάρσιος, τετράγωνος οσφυϊκός'), group: 'core', w: 1, ids: ['ext_oblique', 'int_oblique', 'transversus', 'quadratus_lumb'] },
   { id: 'glutes', name: T('Glutes', 'Γλουτοί'), full: T('Gluteus maximus', 'Μέγας γλουτιαίος'), group: 'hips', w: 3, ids: ['glute_max'] },
   { id: 'abductors', name: T('Side glutes', 'Πλάγιοι γλουτοί'), full: T('Gluteus medius & minimus, TFL, hip rotators', 'Μέσος & ελάσσων γλουτιαίος, TFL, έξω στροφείς'), group: 'hips', w: 2, ids: ['glute_med', 'glute_min', 'tfl', 'hip_rotators'] },
@@ -81,15 +83,25 @@ export function roleOf(ex, ids) {
 
 // σετ που χρειάζεται ένας μυς ανά στόχο, ως ποσοστό του κανόνα των 10 (απώλεια λίπους/διατήρηση: όγκος συντήρησης)
 export const GOAL_SETS = { cut: 0.7, maintain: 0.6, recomp: 1, bulk: 1, build: 1 };
+// άσκηση «κορμού»: όλοι οι κύριοι μύες της είναι κοιλιακοί/κορμός/καμπτήρες ισχίου
+const CORE_IDS = ['rectus_abd', 'ext_oblique', 'int_oblique', 'transversus', 'quadratus_lumb', 'iliopsoas'];
+const isCoreEx = (ex) => ex.p.length > 0 && ex.p.every((t) => CORE_IDS.some((c) => t === c || t.startsWith(c + '.')));
+// ρόλος άσκησης για έναν μυ· για «άμεση» μέτρηση (κοιλιακοί): το ½ του βοηθητικού μετράει μόνο σε ασκήσεις κορμού
+export function roleFor(ex, m) {
+  const r = roleOf(ex, m.ids);
+  return m.direct && r === 0.5 && !isCoreEx(ex) ? 0 : r;
+}
+export const maxOf = (m) => m.max ?? RULES.max;
+export const capOf = (m) => m.cap ?? RULES.sessionCap;
 export const minOf = (m) => m.min ?? (m.w <= 1 ? RULES.minorMin : RULES.min);
-export const volScore = (V, min = RULES.min) => (V <= 0 ? 0 : V < min ? (10 * V) / min : V <= RULES.max ? 10 : Math.max(6, 10 - (V - RULES.max) * 0.25));
+export const volScore = (V, min = RULES.min, max = RULES.max) => (V <= 0 ? 0 : V < min ? (10 * V) / min : V <= max ? 10 : Math.max(6, 10 - (V - max) * 0.25));
 export const freqScore = (hits, V) => (V <= 0 ? 0 : hits >= RULES.freqTarget ? 10 : hits === 1 ? 5 : 3);
-export const distScore = (maxS) => (maxS <= RULES.sessionCap ? 10 : Math.max(4, 10 - (maxS - RULES.sessionCap) * 0.75));
+export const distScore = (maxS, cap = RULES.sessionCap) => (maxS <= cap ? 10 : Math.max(4, 10 - (maxS - cap) * 0.75));
 
-export function muscleScore(V, hits, maxS, min = RULES.min) {
+export function muscleScore(V, hits, maxS, min = RULES.min, max = RULES.max, cap = RULES.sessionCap) {
   if (V <= 0) return 0;
   const k = Math.min(1, V / min);
-  return Math.min(10, 0.7 * volScore(V, min) + k * (0.25 * freqScore(hits, V) + 0.05 * distScore(maxS)));
+  return Math.min(10, 0.7 * volScore(V, min, max) + k * (0.25 * freqScore(hits, V) + 0.05 * distScore(maxS, cap)));
 }
 
 export function bandOf(V, score) {
@@ -137,7 +149,7 @@ export function analyze(programs, exById) {
       if (!ex || !(it.sets > 0)) continue;
       s.total += it.sets;
       for (const m of muscles) {
-        const r = roleOf(ex, m.ids);
+        const r = roleFor(ex, m);
         if (r) s.sets.set(m.id, (s.sets.get(m.id) ?? 0) + r * it.sets);
       }
     }
@@ -147,7 +159,7 @@ export function analyze(programs, exById) {
       const ex = exById.get(it.ex);
       if (!ex || !(it.sets > 0)) continue;
       for (const m of muscles) {
-        const r = roleOf(ex, m.ids);
+        const r = roleFor(ex, m);
         if (r) m.contrib.push({ ex, program: p, role: r, sets: it.sets, perWeek: p.perWeek, weekly: r * it.sets * p.perWeek });
       }
     }
@@ -162,10 +174,12 @@ export function analyze(programs, exById) {
       if (v >= RULES.hit) m.hits++;
       m.maxS = Math.max(m.maxS, v);
     }
-    m.vol = volScore(m.V, m.min);
+    m.max = maxOf(m);
+    m.cap = capOf(m);
+    m.vol = volScore(m.V, m.min, m.max);
     m.freq = freqScore(m.hits, m.V);
-    m.dist = distScore(m.maxS);
-    m.base = muscleScore(m.V, m.hits, m.maxS, m.min);
+    m.dist = distScore(m.maxS, m.cap);
+    m.base = muscleScore(m.V, m.hits, m.maxS, m.min, m.max, m.cap);
     m.contrib.sort((a, b) => b.weekly - a.weekly);
     // πρόοδος φορτίου του μυός: μέσος όρος των ασκήσεών του, με βάρος τα εβδομαδιαία σετ (χωρίς καταγραφή = 0)
     m.prog = null;
@@ -387,7 +401,7 @@ export function suggest(result, programs, exById) {
       actions: [],
     });
   }
-  for (const m of result.muscles.filter((x) => x.maxS > RULES.sessionCap + 2 && x.V <= RULES.excess)) {
+  for (const m of result.muscles.filter((x) => x.maxS > x.cap + 2 && x.V <= RULES.excess)) {
     out.push({
       kind: 'excess', muscle: m,
       title: T(`${m.name}: ${fmt(m.maxS)} sets in one session`, `${m.name}: ${fmt(m.maxS)} σετ σε μία προπόνηση`),
@@ -413,6 +427,24 @@ export function suggest(result, programs, exById) {
   if (typeof window !== 'undefined' && window.__mxProg) {
     const tips = window.__mxProg.tips(result.overload);
     if (tips.length) out.splice(Math.min(2, out.length), 0, ...tips);
+  }
+  // 8β. Αρχικό φορτίο για κάθε άσκηση χωρίς καταγραφή (από σωματικό βάρος, φύλο, ηλικία και τις καταγραφές σου)
+  if (typeof window !== 'undefined' && window.__mxProg && window.__mxProg.starters) {
+    const st = window.__mxProg.starters(programs);
+    const hasW = !!(window.__mxBody && window.__mxBody.metrics && window.__mxBody.metrics(0).W);
+    if (st.length || !hasW) {
+      const acts = [];
+      if (st.length) acts.push({ type: 'progress', ex: st[0].ex, pid: st[0].pid });
+      if (!hasW) acts.push({ type: 'tab', id: 'body' });
+      out.splice(Math.min(2, out.length), 0, {
+        kind: 'startw',
+        title: st.length ? T(`Starting loads for ${st.length} ${st.length === 1 ? 'exercise' : 'exercises'} without a log`, `Αρχικό φορτίο για ${st.length} ${st.length === 1 ? 'άσκηση' : 'ασκήσεις'} χωρίς καταγραφή`) : T('Starting loads need your weight', 'Για αρχικά φορτία χρειάζεται το βάρος σου'),
+        text: (st.length ? T('A load you can lift for the reps shown with 2–3 reps to spare, from your body weight, sex and age and calibrated on the lifts you have already logged. If the first set feels too easy or too hard, change it by 5–10%, then log it in the Progress tab.', 'Ένα φορτίο που σηκώνεις για τις επαναλήψεις που φαίνονται αφήνοντας 2–3 «στο ρεζερβουάρ», από το σωματικό σου βάρος, το φύλο και την ηλικία, προσαρμοσμένο σε ό,τι έχεις ήδη καταγράψει. Αν το πρώτο σετ είναι πολύ εύκολο ή πολύ δύσκολο, άλλαξέ το κατά 5–10% και μετά κατάγραψέ το στην καρτέλα Πρόοδος.') : '')
+          + (!hasW ? (st.length ? ' ' : '') + T('Add your weight (and sex and age) in the Body tab to get kilos for the exercises with weights.', 'Πρόσθεσε το βάρος σου (και φύλο και ηλικία) στην καρτέλα Σώμα για να πάρεις κιλά και για τις ασκήσεις με βάρη.') : ''),
+        items: st.map((x) => `${x.name} (${x.day}): ${x.text}`),
+        actions: acts,
+      });
+    }
   }
   // 9. Σώμα και στόχοι (addons/body.js)
   if (typeof window !== 'undefined' && window.__mxBody) {

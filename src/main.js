@@ -809,13 +809,14 @@ function muscleStatus(m) {
   if (m.V <= 0) return T(`Not trained. Target: at least ${m.min} sets a week, over 2 sessions.`, `Δεν δουλεύει. Στόχος: τουλάχιστον ${m.min} σετ την εβδομάδα, σε 2 προπονήσεις.`);
   const out = [];
   if (m.V < m.min) out.push(T(`${nf(m.V)} sets a week: about ${Math.ceil(m.min - m.V)} short of the ${m.min}-set target.`, `${nf(m.V)} σετ την εβδομάδα: λείπουν περίπου ${Math.ceil(m.min - m.V)} για τον στόχο των ${m.min}.`));
-  else if (m.V <= RULES.max) out.push(T(`${nf(m.V)} sets a week: within the optimal ${m.min}–${RULES.max} range.`, `${nf(m.V)} σετ την εβδομάδα: μέσα στο βέλτιστο εύρος ${m.min}–${RULES.max}.`));
+  else if (m.V <= m.max) out.push(T(`${nf(m.V)} sets a week: within the optimal ${m.min}–${m.max} range.`, `${nf(m.V)} σετ την εβδομάδα: μέσα στο βέλτιστο εύρος ${m.min}–${m.max}.`));
   else if (m.V <= RULES.excess) out.push(T(`${nf(m.V)} sets a week: a little above optimal, fine if you recover well.`, `${nf(m.V)} σετ την εβδομάδα: λίγο πάνω από το βέλτιστο, εντάξει αν αναρρώνεις καλά.`));
   else out.push(T(`${nf(m.V)} sets a week: a lot of volume for little extra benefit.`, `${nf(m.V)} σετ την εβδομάδα: πολύς όγκος με μικρό επιπλέον όφελος.`));
   out.push(m.hits >= 2 ? T(`Trained ${m.hits} times a week.`, `Δουλεύει ${m.hits} φορές την εβδομάδα.`)
     : m.hits === 1 ? T('Trained once a week (target: twice).', 'Δουλεύει 1 φορά την εβδομάδα (στόχος: 2).')
       : T('The sets are scattered: less than 1.5 in any session.', 'Τα σετ είναι σκόρπια: λιγότερα από 1,5 σε κάθε προπόνηση.'));
-  if (m.maxS > RULES.sessionCap) out.push(T(`Up to ${nf(m.maxS)} sets in one session; above about 10 the returns drop.`, `Έως ${nf(m.maxS)} σετ σε μία προπόνηση· πάνω από ~10 η απόδοση πέφτει.`));
+  if (m.maxS > m.cap) out.push(T(`Up to ${nf(m.maxS)} sets in one session; above about ${m.cap} the returns drop.`, `Έως ${nf(m.maxS)} σετ σε μία προπόνηση· πάνω από ~${m.cap} η απόδοση πέφτει.`));
+  if (m.direct) out.push(T('Only direct ab work counts here (crunches, leg raises, ab wheel, planks…): squats, deadlifts and presses keep the abs but do not grow them. Aim for 8–16 hard sets a week of 8–20 reps, over 2–4 short sessions.', 'Εδώ μετράει μόνο η άμεση δουλειά κοιλιακών (crunches, ανυψώσεις ποδιών, ροδάκι, σανίδες…): τα καθίσματα, οι άρσεις και οι πιέσεις τους διατηρούν αλλά δεν τους μεγαλώνουν. Στόχος 8–16 σκληρά σετ την εβδομάδα με 8–20 επαναλήψεις, σε 2–4 σύντομες προπονήσεις.'));
   return out.join(' ');
 }
 
@@ -837,11 +838,11 @@ function muscleParts(m, result) {
 function vbar(m) {
   const S = 30;
   const pct = (x) => `${(Math.min(S, Math.max(0, x)) / S) * 100}%`;
-  return `<div class="rv-vbar" role="img" aria-label="${esc(T(`${nf(m.V)} sets, target ${m.min} to ${RULES.max}`, `${nf(m.V)} σετ, στόχος ${m.min} έως ${RULES.max}`))}">
-    <i class="rv-zone" style="left:${pct(m.min)};width:calc(${pct(RULES.max)} - ${pct(m.min)})"></i>
+  return `<div class="rv-vbar" role="img" aria-label="${esc(T(`${nf(m.V)} sets, target ${m.min} to ${m.max}`, `${nf(m.V)} σετ, στόχος ${m.min} έως ${m.max}`))}">
+    <i class="rv-zone" style="left:${pct(m.min)};width:calc(${pct(m.max)} - ${pct(m.min)})"></i>
     <i class="rv-mark" style="left:${pct(m.V)};background:${BANDS[m.band].color}"></i>
   </div>
-  <div class="rv-vticks"><span style="left:0">0</span><span style="left:${pct(m.min)}">${m.min}</span><span style="left:${pct(RULES.max)}">${RULES.max}</span><span style="left:100%">30+</span></div>`;
+  <div class="rv-vticks"><span style="left:0">0</span><span style="left:${pct(m.min)}">${m.min}</span><span style="left:${pct(m.max)}">${m.max}</span><span style="left:100%">30+</span></div>`;
 }
 
 const perWeekLabel = (n) => T(`${n}× / week`, `${n}× / εβδ.`);
@@ -973,6 +974,7 @@ function tabTips(result, progs) {
       <li class="rv-sugg kind-${t.kind}">
         <div class="rv-sugg-head">${t.muscle ? pill(t.muscle.score, t.muscle.band) : ''}<b>${esc(t.title)}</b></div>
         <p>${esc(t.text)}</p>
+        ${t.items?.length ? `<ul class="rv-startlist">${t.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
         ${t.actions.length ? `<div class="rv-sugg-actions">${t.actions.map((a, j) => `<button type="button" class="btn" data-act="${a.type}" data-ex="${esc(a.ex ?? '')}" data-sets="${a.sets ?? ''}" data-id="${esc(a.id ?? '')}" data-program="${esc(a.program ?? '')}" data-pid="${esc(a.pid ?? '')}" data-n="${a.n ?? ''}" data-key="act:${i}:${j}">${actionLabel(a, progs)}</button>`).join('')}</div>` : ''}
       </li>`).join('')}</ol>
       ${tips.length > shown.length ? `<button type="button" class="rv-link" data-alltips>${T(`All suggestions (${tips.length})`, `Όλες οι προτάσεις (${tips.length})`)}</button>` : ''}`
@@ -1065,6 +1067,7 @@ function renderReview({ fresh = false, ifChanged = false, scrollTo = null, focus
       <ul class="notes">
         <li>${T('We count hard sets (6–30 reps, ending 0–3 reps short of failure). The primary muscle of an exercise gets 1 set, a secondary muscle ½.', 'Μετράμε σκληρά σετ (6–30 επαναλήψεις, 0–3 πριν την αποτυχία). Ο κύριος μυς μιας άσκησης παίρνει 1 σετ, ο βοηθητικός ½.')}</li>
         <li>${T('Volume, the rule of 10: each muscle group needs at least 10 sets a week, ideally 10–20. Below that the score drops in proportion (6 sets = 6/10). The small assisting muscles (rotator cuff, forearms, shins, hip flexors, front delts, upper traps, obliques, brachialis) need at least 6.', 'Όγκος, ο κανόνας του 10: κάθε μυϊκή ομάδα θέλει τουλάχιστον 10 σετ την εβδομάδα, ιδανικά 10–20. Με λιγότερα ο βαθμός πέφτει αναλογικά (6 σετ = 6/10). Οι μικροί βοηθητικοί μύες (στροφικό πέταλο, πήχεις, κνήμη, καμπτήρες ισχίου, μπροστινός ώμος, άνω τραπεζοειδής, λοξοί, βραχιόνιος) θέλουν τουλάχιστον 6.')}</li>
+        <li>${T('Abs are scored differently: only direct ab exercises count (the big lifts maintain the abs but hardly grow them), the target is 8–16 hard sets a week over at least 2 sessions, and up to about 8 sets in one session (abs recover fast, so total weekly sets matter more than how often).', 'Οι κοιλιακοί βαθμολογούνται αλλιώς: μετράνε μόνο οι ασκήσεις κοιλιακών (τα μεγάλα πολυαρθρικά τους διατηρούν αλλά σχεδόν δεν τους μεγαλώνουν), ο στόχος είναι 8–16 σκληρά σετ την εβδομάδα σε τουλάχιστον 2 προπονήσεις και έως ~8 σετ σε μία (αναρρώνουν γρήγορα, οπότε μετράνε περισσότερο τα συνολικά σετ της εβδομάδας παρά η συχνότητα).')}</li>
         <li>${T('Frequency: each muscle at least twice a week (a session counts when it gives the muscle 1.5 sets or more).', 'Συχνότητα: κάθε μυς τουλάχιστον 2 φορές την εβδομάδα (μια προπόνηση μετράει αν δίνει ≥1,5 σετ στον μυ).')}</li>
         <li>${T('Distribution: up to about 10 sets for the same muscle in one session.', 'Κατανομή: έως ~10 σετ για τον ίδιο μυ σε μία προπόνηση.')}</li>
         <li>${T('Muscle score, from all the review tabs: 85% sets & frequency (Programs tab: 70% volume + 25% frequency + 5% distribution) + 15% load progression of the exercises that train it (Progress tab, weighted by their sets). With fat loss or maintenance as your goal (Goals and Body tabs) the set target drops to about 70% or 60% of the rule of 10. A measurement that has not grown for 6+ weeks while you aim for growth (Body tab) takes 0.5 off. Group score = average of its muscles, with the big muscles counting three times.', 'Βαθμός μυός, από όλες τις καρτέλες της αξιολόγησης: 85% σετ & συχνότητα (καρτέλα Προγράμματα: 70% όγκος + 25% συχνότητα + 5% κατανομή) + 15% πρόοδος φορτίου των ασκήσεων που τον δουλεύουν (καρτέλα Πρόοδος, με βάρος τα σετ τους). Με στόχο απώλεια λίπους ή διατήρηση (καρτέλες Στόχοι και Σώμα) ο στόχος σετ πέφτει περίπου στο 70% ή 60% του κανόνα των 10. Μια περιφέρεια που δεν μεγαλώνει 6+ εβδομάδες ενώ στοχεύεις ανάπτυξη (καρτέλα Σώμα) αφαιρεί 0,5. Ομάδα = μέσος όρος των μυών της, με τους μεγάλους μύες να μετράνε τριπλά.')}</li>
