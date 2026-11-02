@@ -369,19 +369,14 @@
   const style = document.createElement('style'); style.textContent = css; document.head.appendChild(style);
 
   /* ------------------------------------------------------------ κάρτα άσκησης (χάρτης): μία ενότητα για κάθε μέρα που την περιέχει */
+  // ο χάρτης συνδέεται με τα προγράμματα μόνο όταν το ζητήσεις: η ενότητα εμφανίζεται μόνο για τις ασκήσεις των
+  // προγραμμάτων που έστειλες στον χάρτη («Δείξε στον χάρτη» στην ενότητα «Προγράμματα»)
   function mountCard(holder, ex) {
     const m = window.__mxProgram;
-    const progs = m && m.programs ? m.programs() : [];
+    const shown = m && m.shown ? m.shown() : [];
+    const progs = (m && m.programs ? m.programs() : []).filter((p) => shown.includes(p.id));
     const occs = occurrences(progs).filter((o) => o.ex === ex.id);
     holder.replaceChildren();
-    if (!occs.length) {
-      const legacy = hist(ex.id, null);
-      const det = h('details', { class: 'pg' }, h('summary', {}, T('Progression', 'Πρόοδος φορτίου')),
-        h('div', { class: 'pg-box' }, h('p', { class: 'pg-sub', text: T('Add this exercise to a program in the Programs section to log its progression. The number of sets comes from the Programs tab of the review.', 'Πρόσθεσε την άσκηση σε ένα πρόγραμμα στην ενότητα «Προγράμματα» για να καταγράφεις την πρόοδό της. Ο αριθμός των σετ έρχεται από την καρτέλα Προγράμματα της αξιολόγησης.') }),
-          legacy.length ? h('ul', { class: 'pg-hist' }, legacy.slice().reverse().map((e) => h('li', {}, h('span', { class: 'd', text: fmtDate(e.since) }), h('span', { class: 'v', text: setsText(e.sets) })))) : null));
-      holder.appendChild(det);
-      return;
-    }
     occs.forEach((o) => {
       if (occs.length > 1) holder.appendChild(h('p', { class: 'pg-card-day', text: o.program.name }));
       mountOcc(holder, o, false);
@@ -409,7 +404,7 @@
   function refreshCards() {
     const m = window.__mxProgram;
     const progs = m && m.programs ? m.programs() : [];
-    const s = JSON.stringify(progs.map((p) => [p.id, p.name, p.items.map((it) => [it.ex, it.sets])]));
+    const s = JSON.stringify([m && m.shown ? m.shown() : [], progs.map((p) => [p.id, p.name, p.items.map((it) => [it.ex, it.sets])])]);
     if (s === lastProgSig) return;
     lastProgSig = s;
     document.querySelectorAll('#panel .pg-holder').forEach((holder) => { if (holder.__ex && !holder.querySelector('input:focus')) mountCard(holder, holder.__ex); });

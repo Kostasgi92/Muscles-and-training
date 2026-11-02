@@ -29,7 +29,9 @@ const SECONDARY = '#ffb01f';
 const exById = new Map(EXERCISES.map((e) => [e.id, e]));
 let custom = store.get('mx.custom', []).filter((e) => e && e.id && Array.isArray(e.p));
 for (const e of custom) { e.ai = true; exById.set(e.id, e); window.__mxCustom && window.__mxCustom(e); }
-let userProgram = store.get('mx.program', []).filter((x) => typeof x === 'string');
+// οι ασκήσεις των προγραμμάτων που έστειλες στον χάρτη από την ενότητα «Προγράμματα» (δεν επανέρχονται στο άνοιγμα)
+let userProgram = [];
+let shownPrograms = [];
 
 const index = new SearchIndex();
 const indexExercise = (e) => index.add({ type: 'exercise', id: e.id, title: e.el, sub: e.en, aliases: [e.el, e.en, ...(e.aka ?? [])], ref: e });
@@ -66,9 +68,13 @@ function exercisesFor(unit) {
   return out.sort((a, b) => (a.role === b.role ? 0 : a.role === 'p' ? -1 : 1) || (a.ex.ai ? 1 : 0) - (b.ex.ai ? 1 : 0));
 }
 
+// Μια άσκηση της βάσης που ταιριάζει καθαρά προηγείται μιας που αναγνώρισε το Claude (αυτές μένουν μόνο σε αυτόν
+// τον browser): έτσι το ίδιο όνομα δίνει την ίδια άσκηση σε κάθε συσκευή.
 function resolveExercise(text) {
-  const r = index.search(text, 4).filter((x) => x.type === 'exercise');
-  return r[0] && r[0].score >= CONFIDENT ? r[0].ref : null;
+  const r = index.search(text, 6).filter((x) => x.type === 'exercise');
+  if (!r[0] || r[0].score < CONFIDENT) return null;
+  if (r[0].ref.ai) { const b = r.find((x) => !x.ref.ai && x.score >= 0.8); if (b) return b.ref; }
+  return r[0].ref;
 }
 // τα ονόματα των αποθηκευμένων προγραμμάτων ψάχνονται σε κάθε σχεδίαση της αξιολόγησης
 const resolveCache = new Map();
@@ -173,16 +179,19 @@ function navLabel() {
 window.__mxProgram = {
   exById: (id) => exById.get(id) || null,
   get: () => userProgram.slice(),
+  shown: () => shownPrograms.slice(),
   navDepth: () => navStack.length,
   navLabel,
   back: uiBack,
   histPush,
   onBack: (fn) => backHooks.push(fn),
-  set(list) {
+  // list: ονόματα ασκήσεων · ids: τα προγράμματα από τα οποία προέρχονται
+  set(list, ids = []) {
     userProgram = list.filter((e) => typeof e === 'string' && e.trim());
-    store.set('mx.program', userProgram);
+    shownPrograms = ids.slice();
     renderChips();
   },
+  clear: () => clearMap(),
   show: () => showProgram(),
   empty() {
     navStack.length = 0;
@@ -407,10 +416,6 @@ function mchip(id, role) {
 const list = (arr, cls = 'notes') => (arr?.length ? `<ul class="${cls}">${arr.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '');
 const steps = (arr) => (arr?.length ? `<ol class="steps">${arr.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>` : '');
 
-function inProgram(ex) {
-  return userProgram.some((t) => resolveExercise(t)?.id === ex.id);
-}
-
 function showExercise(ex, { frame = true } = {}) {
   navPush('exercise:' + ex.id);
   cancelClaude();
@@ -434,15 +439,11 @@ function showExercise(ex, { frame = true } = {}) {
         ${ex.tips?.length ? `<div><h3>${__G('Συμβουλές')}</h3>${list(ex.tips)}</div>` : ''}
         ${ex.errs?.length ? `<div><h3>${__G('Συχνά λάθη')}</h3>${list(ex.errs, 'notes bad')}</div>` : ''}
       </div>
-      <div class="actions">
-        ${inProgram(ex) ? '' : '<button type="button" class="btn" data-act="add">' + __G('＋ Στο πρόγραμμά μου') + '</button>'}
-        <button type="button" class="btn ghost" data-act="program">${__G('Όλο το πρόγραμμα στο σώμα')}</button>
-      </div>
+      ${userProgram.length ? `<div class="actions"><button type="button" class="btn ghost" data-act="program">${__G('Όλο το πρόγραμμα στο σώμα')}</button></div>` : ''}
       ${ex.ai ? '<p class="disclaimer">' + __G('Η ανάλυση έγινε από το Claude και μπορεί να έχει ανακρίβειες.') + '</p>' : ''}
     </article>`;
   bindMuscleChips(panel());
-  panel().querySelector('[data-act="add"]')?.addEventListener('click', () => { addToProgram(ex); showExercise(ex, { frame: false }); });
-  panel().querySelector('[data-act="program"]').addEventListener('click', () => showProgram());
+  panel().querySelector('[data-act="program"]')?.addEventListener('click', () => showProgram());
   panel().scrollTop = 0;
   markChips();
   if (mid && viewer && modelReady) { applyModelState(false); attachMotion(); }
@@ -602,14 +603,6 @@ function showProgram() {
   applyModelState(true);
 }
 
-function addToProgram(ex) {
-  if (inProgram(ex)) return;
-  userProgram = [...userProgram, ex.el];
-  store.set('mx.program', userProgram);
-  renderChips();
-  window.__mxSel && window.__mxSel('program');
-}
-
 // όνομα για τα chips: όπως λέγεται η άσκηση στη γλώσσα της εφαρμογής
 function displayName(t) {
   try { return resolveExercise(t)?.el || t; } catch { return t; }
@@ -619,17 +612,34 @@ function renderChips() {
   const box = $('#chips');
   const items = [
     ...(userProgram.length ? ['<button type="button" class="chip all" data-all="1">' + __G('Όλο το πρόγραμμα') + '</button>'] : []),
-    ...userProgram.map((t, i) => `<span class="chip" role="group"><button type="button" class="chip-txt" data-q="${esc(t)}" style="all:unset;cursor:pointer">${esc(displayName(t))}</button><button type="button" class="x" data-rm="${i}" aria-label="${__G('Αφαίρεση')} ${esc(displayName(t))}">×</button></span>`),
+    ...userProgram.map((t) => `<button type="button" class="chip" data-q="${esc(t)}">${esc(displayName(t))}</button>`),
   ];
   box.innerHTML = items.join('');
   box.querySelector('[data-all]')?.addEventListener('click', showProgram);
   box.querySelectorAll('[data-q]').forEach((b) => b.addEventListener('click', () => { $('#exInput').value = b.dataset.q; run(b.dataset.q); }));
-  box.querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', () => {
-    userProgram = userProgram.filter((_, i) => i !== Number(b.dataset.rm));
-    store.set('mx.program', userProgram);
-    renderChips();
-  }));
   markChips();
+}
+
+// «Καθαρισμός χάρτη»: πίσω στο σώμα μόνο του, χωρίς άσκηση, μυ, προγράμματα, αναζήτηση ή επισημάνσεις
+function clearMap() {
+  flushAll();
+  cancelClaude();
+  stopMotion();
+  userProgram = [];
+  shownPrograms = [];
+  const inp = $('#exInput');
+  if (inp) inp.value = '';
+  const sg = $('#suggest');
+  if (sg) { sg.hidden = true; inp?.setAttribute('aria-expanded', 'false'); }
+  rv.muscle = null;
+  window.__mxSel && window.__mxSel(null);
+  window.__mxProgram.empty();
+  if (viewer && modelReady) {
+    viewer.setSelectedIds?.([]);
+    viewer.setView('three');
+  }
+  setLevel(0);
+  window.scrollTo(0, 0);
 }
 
 function markChips() {
@@ -837,14 +847,6 @@ function vbar(m) {
 const perWeekLabel = (n) => T(`${n}× / week`, `${n}× / εβδ.`);
 const setsWord = (n) => T(n === 1 ? 'set' : 'sets', 'σετ');
 
-// ο χάρτης έχει πρόγραμμα (από «＋ Στο πρόγραμμά μου») που δεν είναι αποθηκευμένο
-function mapProgramUnsaved(progs) {
-  if (!userProgram.length) return false;
-  const key = (names) => [...new Set(names.map((n) => resolveName(n)?.el ?? n))].sort().join('\u0001');
-  const cur = key(userProgram);
-  return !progs.some((p) => key(p.names) === cur);
-}
-
 function tabPrograms(progs) {
   const canAsk = !state.claudeOff;
   const cards = progs.map((p) => {
@@ -887,7 +889,6 @@ function tabPrograms(progs) {
   }).join('');
   return `
     <p class="sub">${T('The programs and exercises come from the Programs section, the only place to add or remove them. Here you set the sets of each exercise, how many times a week you do each program and which programs are in your week. The Progress tab always has the same exercises and sets.', 'Τα προγράμματα και οι ασκήσεις έρχονται από την ενότητα «Προγράμματα», τη μόνη όπου προσθέτεις ή αφαιρείς ασκήσεις. Εδώ ορίζεις τα σετ κάθε άσκησης, πόσες φορές την εβδομάδα κάνεις κάθε πρόγραμμα και ποια προγράμματα είναι στην εβδομάδα σου. Η καρτέλα Πρόοδος έχει πάντα τις ίδιες ασκήσεις και τα ίδια σετ.')}</p>
-    ${mapProgramUnsaved(progs) ? `<div class="rv-note"><span>${T(`The program on your map (${userProgram.length} exercises) is not saved, so it is not part of the review.`, `Το πρόγραμμα του χάρτη (${userProgram.length} ασκήσεις) δεν είναι αποθηκευμένο, οπότε δεν μετράει στην αξιολόγηση.`)}</span><button type="button" class="btn" data-savemap>${T('Save it', 'Αποθήκευσέ το')}</button></div>` : ''}
     <div class="rv-plist">${cards || `<p class="msg">${T('You have no saved programs yet. Create them in the Programs section, where you can also add a coach template for a complete week.', 'Δεν έχεις ακόμα αποθηκευμένα προγράμματα. Φτιάξε τα στην ενότητα «Προγράμματα», όπου μπορείς να προσθέσεις και πρότυπο προπονητή για ολόκληρη εβδομάδα.')}</p>`}</div>
     <div class="actions rv-actions">
       <button type="button" class="btn" data-goprog>${T('Open the Programs section', 'Άνοιξε την ενότητα «Προγράμματα»')}</button>
@@ -999,7 +1000,7 @@ function renderReview({ fresh = false, ifChanged = false, scrollTo = null, focus
   const api = progApi();
   const ready = !!api && api.ready();
   const progs = ready ? reviewPrograms() : [];
-  const sig = JSON.stringify([ready, userProgram, window.__mxProg ? window.__mxProg.sig() : '', window.__mxBody ? window.__mxBody.sig() : '', progs.map((p) => [p.id, p.name, p.perWeek, p.active, p.items.map((it) => [it.name, it.ex, it.sets])])]);
+  const sig = JSON.stringify([ready, window.__mxProg ? window.__mxProg.sig() : '', window.__mxBody ? window.__mxBody.sig() : '', progs.map((p) => [p.id, p.name, p.perWeek, p.active, p.items.map((it) => [it.name, it.ex, it.sets])])]);
   if (ifChanged && !fresh && sig === rv.sig && $('#panel > article.review')) return;
   rv.sig = sig;
   if (ready && !rv.opened) {
@@ -1127,7 +1128,6 @@ async function onReviewClick(e) {
   // η προσθήκη/αφαίρεση ασκήσεων γίνεται μόνο στην ενότητα «Προγράμματα»
   if ('edit' in d && p) { flushAll(); api?.openEdit(p.id, { returnTo: 'review' }); return; }
   if ('goprog' in d) { flushAll(); api?.show?.(); return; }
-  if ('savemap' in d) { flushAll(); api?.openNew(userProgram.join('\n'), { returnTo: 'review' }); return; }
   if ('recog' in d && p) { recognise(p, Number(d.recog), t); return; }
   if (d.m) {
     rv.muscle = rv.muscle === d.m ? null : d.m;
@@ -1389,22 +1389,17 @@ function bindControls() {
 
 // ------------------------------------------------------------------ εκκίνηση
 function start() {
+  store.set('mx.program', []);
   renderChips();
   bindSearch();
   bindControls();
+  $('#mapReset')?.addEventListener('click', clearMap);
+  // ο χάρτης είναι η αρχική σελίδα: ανοίγει πάντα με μόνο το σώμα· άσκηση, μυς ή αξιολόγηση μόνο με ρητό σύνδεσμο (#…)
   const hash = decodeURIComponent(location.hash.slice(1));
   if (hash && exById.has(hash)) showExercise(exById.get(hash), { frame: true });
   else if (hash && MUSCLES[hash]) showMuscle(hash, { frame: true });
   else if (hash === 'review') showReview();
-  else {
-    const s = store.get('mx.sel', null);
-    const t = s && s.kind === 'exercise' && typeof s.name === 'string' ? resolveExercise(s.name) : null;
-    if (s && s.kind === 'review') showReview();
-    else if (s && s.kind === 'program' && userProgram.length) showProgram();
-    else if (t) { $('#exInput').value = s.name; showExercise(t, { frame: false }); }
-    else if (s && s.kind === 'muscle' && MUSCLES[s.id]) showMuscle(s.id, { frame: false });
-    else window.__mxProgram.empty();
-  }
+  else window.__mxProgram.empty();
   getSample().then((s) => {
     rv.sampleOK = !!s;
     if (s && state.mode === 'review' && rv.tab === 'tips' && rv.tips) renderReview();

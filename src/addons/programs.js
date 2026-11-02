@@ -37,7 +37,6 @@ var __G=window.__mxG||(s=>s);
   let editingId = null;       // 'new' | id | null
   let draft = null;           // κατάσταση φόρμας, επιβιώνει τα re-render όσο πληκτρολογείς
   let confirmDeleteId = null;
-  let confirmLoadId = null;
   let saving = false;
   let statusTimer = null;
   let view = 'map';
@@ -45,10 +44,10 @@ var __G=window.__mxG||(s=>s);
   const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } };
 
-  // ό,τι διάλεξε ο χρήστης να δείχνει η αρχική: πρόγραμμα, άσκηση ή μυς
-  let sel = lsGet('mx.sel', null) || { kind: null };
-  let progId = lsGet('mx.progId', null);
-  let progName = lsGet('mx.progName', null);
+  // τι δείχνει ο χάρτης (δεν επανέρχεται στο άνοιγμα: ο χάρτης είναι η αρχική σελίδα, μόνο με το σώμα)
+  let sel = { kind: null };
+  let shownIds = [];              // τα προγράμματα που στάλθηκαν στον χάρτη με «Δείξε στον χάρτη»
+  const mapPick = new Set();      // τσεκαρισμένα προγράμματα για τον χάρτη
   let drillUntil = 0;
 
   // κλικ μέσα στην καρτέλα, στα chips ή στο σώμα = περιήγηση μέσα στο πρόγραμμα, δεν αλλάζει την επιλογή
@@ -63,9 +62,10 @@ var __G=window.__mxG||(s=>s);
       const want = kind === 'review' ? 'review' : 'map';
       if (view !== want) { view = want; pressView(); }
     }
+    // «Καθαρισμός χάρτη»: ξεχνά και τα προγράμματα του χάρτη και τις επιλογές
+    if (!kind) { sel = { kind: null }; shownIds = []; mapPick.clear(); drillUntil = 0; updateShowBtn(); if (view === 'programs') renderPrograms(); applyNav(); return; }
     if ((sel.kind === 'program' || sel.kind === 'review') && kind !== sel.kind && performance.now() < drillUntil) return;
     sel = kind === 'exercise' ? { kind, name: v } : kind === 'muscle' ? { kind, id: v } : { kind };
-    lsSet('mx.sel', sel);
     applyNav();
   };
 
@@ -74,10 +74,9 @@ var __G=window.__mxG||(s=>s);
     const nav = document.querySelector('nav.program');
     const cur = m ? m.get() : [];
     nav.hidden = view === 'programs' || !(sel.kind === 'program' && cur.length);
-    // το όνομα του προγράμματος, όσο η λίστα δεν έχει αλλάξει από την αποθηκευμένη μορφή του
-    const p = programs.find((q) => q.id === progId);
-    const same = p ? keyOf(canonicalNames(p)) === keyOf(cur) : (!loaded && !!progName);
-    document.querySelector('.program-label').textContent = same && (p ? p.name : progName) ? (p ? p.name : progName) : (__G("\u03a4\u03bf \u03c0\u03c1\u03cc\u03b3\u03c1\u03b1\u03bc\u03bc\u03ac \u03c3\u03bf\u03c5"));
+    // τα ονόματα των προγραμμάτων που φαίνονται στον χάρτη
+    const names = shownIds.map((id) => programs.find((q) => q.id === id)).filter(Boolean).map((q) => q.name);
+    document.querySelector('.program-label').textContent = names.length ? names.join(' + ') : (__G("\u03a4\u03bf \u03c0\u03c1\u03cc\u03b3\u03c1\u03b1\u03bc\u03bc\u03ac \u03c3\u03bf\u03c5"));
   }
 
   function setStatus(msg) {
@@ -199,25 +198,35 @@ var __G=window.__mxG||(s=>s);
   }
   const keyOf = (arr) => arr.join('\u0001');
 
-  function needsLoadConfirm(p) {
-    const m = mx();
-    if (!m) return false;
-    const cur = m.get();
-    if (!cur.length) return false;
-    if (keyOf(cur) === keyOf(canonicalNames(p))) return false;
-    // το τρέχον πρόγραμμα του χάρτη είναι ήδη αποθηκευμένο κάπου: δεν χάνεται τίποτα
-    return !programs.some((q) => keyOf(canonicalNames(q)) === keyOf(cur));
+  // οι ασκήσεις όλων των επιλεγμένων προγραμμάτων μαζί (χωρίς διπλές), με τη σειρά των προγραμμάτων
+  function unionNames(ids) {
+    const out = [];
+    ids.map((id) => programs.find((q) => q.id === id)).filter(Boolean).forEach((p) => canonicalNames(p).forEach((n) => { if (!out.includes(n)) out.push(n); }));
+    return out;
   }
-
-  function loadProgram(p) {
+  function showOnMap(ids) {
     const m = mx();
     if (!m) { setStatus((__G("\u039f \u03c7\u03ac\u03c1\u03c4\u03b7\u03c2 \u03b4\u03b5\u03bd \u03b5\u03af\u03bd\u03b1\u03b9 \u03ad\u03c4\u03bf\u03b9\u03bc\u03bf\u03c2 \u03b1\u03ba\u03cc\u03bc\u03b1. \u0394\u03bf\u03ba\u03af\u03bc\u03b1\u03c3\u03b5 \u03be\u03b1\u03bd\u03ac \u03c3\u03b5 \u03bb\u03af\u03b3\u03bf."))); return; }
-    confirmLoadId = null;
-    progId = p.id; progName = p.name;
-    lsSet('mx.progId', progId); lsSet('mx.progName', progName);
-    m.set(canonicalNames(p));
+    ids = ids.filter((id) => programs.some((q) => q.id === id));
+    if (!ids.length) return;
+    shownIds = ids;
+    m.set(unionNames(ids), ids);
+    sel = { kind: 'program' };
     setView('map');
     m.show();
+  }
+  // ένα πρόγραμμα του χάρτη άλλαξε ή διαγράφηκε: ο χάρτης δείχνει την τρέχουσα μορφή του
+  function syncMap() {
+    const m = mx();
+    if (!m || !shownIds.length) return;
+    const ids = shownIds.filter((id) => programs.some((q) => q.id === id));
+    const names = unionNames(ids);
+    if (keyOf(names) === keyOf(m.get()) && ids.length === shownIds.length) return;
+    shownIds = ids;
+    m.set(names, ids);
+    if (!ids.length) { if (sel.kind === 'program') { sel = { kind: null }; m.empty(); } }
+    else if (sel.kind === 'program' && view !== 'programs' && m.mode && m.mode() === 'program') m.show();
+    applyNav();
   }
 
   function showExercise(text) {
@@ -248,7 +257,6 @@ var __G=window.__mxG||(s=>s);
     if (!editingId && mx() && mx().histPush) mx().histPush();
     editingId = p ? p.id : 'new';
     confirmDeleteId = null;
-    confirmLoadId = null;
     renderPrograms();
     const first = document.querySelector('#pvList .pform input');
     if (first) first.focus();
@@ -292,11 +300,6 @@ var __G=window.__mxG||(s=>s);
       const plan = planFor(exercises, prev && prev.plan, draft.setsHint, draft.planHint);
       await queued(draft.id || 'new', () => store.save({ id: draft.id, name, exercises, createdAt: draft.createdAt, plan }));
       const wasNew = !draft.id;
-      if (!wasNew && draft.id === progId && mx()) {
-        progName = name; lsSet('mx.progName', progName);
-        mx().set(canonicalNames({ exercises }));
-        if (sel.kind === 'program') mx().show();
-      }
       closeForm();
       setStatus(wasNew ? (__G("\u03a4\u03bf \u03c0\u03c1\u03cc\u03b3\u03c1\u03b1\u03bc\u03bc\u03b1 \u03b4\u03b7\u03bc\u03b9\u03bf\u03c5\u03c1\u03b3\u03ae\u03b8\u03b7\u03ba\u03b5.")) : (__G("\u039f\u03b9 \u03b1\u03bb\u03bb\u03b1\u03b3\u03ad\u03c2 \u03b1\u03c0\u03bf\u03b8\u03b7\u03ba\u03b5\u03cd\u03c4\u03b7\u03ba\u03b1\u03bd.")));
     } catch (e) {
@@ -309,16 +312,7 @@ var __G=window.__mxG||(s=>s);
   async function doDelete(id) {
     try {
       await store.remove(id);
-      if (id === progId) {
-        progId = null; progName = null;
-        lsSet('mx.progId', null); lsSet('mx.progName', null);
-        if (sel.kind === 'program' && mx()) {
-          mx().set([]);
-          sel = { kind: null }; lsSet('mx.sel', sel);
-          mx().empty();
-        }
-        applyNav();
-      }
+      mapPick.delete(id);
       confirmDeleteId = null;
       setStatus((__G("\u03a4\u03bf \u03c0\u03c1\u03cc\u03b3\u03c1\u03b1\u03bc\u03bc\u03b1 \u03b4\u03b9\u03b1\u03b3\u03c1\u03ac\u03c6\u03b7\u03ba\u03b5.")));
       renderPrograms();
@@ -378,32 +372,34 @@ var __G=window.__mxG||(s=>s);
         h('span', { class: 'confirm-text bad', text: (__G("\u039d\u03b1 \u03b4\u03b9\u03b1\u03b3\u03c1\u03b1\u03c6\u03b5\u03af \u03c4\u03bf \u00ab")) + p.name + '»' + (window.__mxLang === 'en' ? '?' : ';') }),
         h('button', { class: 'btn danger solid', type: 'button', onclick: () => doDelete(p.id), text: (__G("\u039d\u03b1\u03b9, \u03b4\u03b9\u03b1\u03b3\u03c1\u03b1\u03c6\u03ae")) }),
         h('button', { class: 'btn', type: 'button', onclick: () => { confirmDeleteId = null; renderPrograms(); }, text: (__G("\u0386\u03ba\u03c5\u03c1\u03bf")) }));
-    } else if (confirmLoadId === p.id) {
-      const cur = m ? m.get().length : 0;
-      actions = h('div', { class: 'pactions' },
-        h('span', { class: 'confirm-text', text: (__G("\u03a4\u03bf \u03c4\u03c1\u03ad\u03c7\u03bf\u03bd \u03c0\u03c1\u03cc\u03b3\u03c1\u03b1\u03bc\u03bc\u03b1 \u03c4\u03bf\u03c5 \u03c7\u03ac\u03c1\u03c4\u03b7 (")) + cur + (" "+__G("\u03b1\u03c3\u03ba\u03ae\u03c3\u03b5\u03b9\u03c2) \u03b4\u03b5\u03bd \u03ad\u03c7\u03b5\u03b9 \u03b1\u03c0\u03bf\u03b8\u03b7\u03ba\u03b5\u03c5\u03c4\u03b5\u03af \u03ba\u03b1\u03b9 \u03b8\u03b1 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03b1\u03c3\u03c4\u03b1\u03b8\u03b5\u03af.")) }),
-        h('button', { class: 'btn primary', type: 'button', onclick: () => loadProgram(p), text: (__G("\u0391\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7")) }),
-        h('button', { class: 'btn', type: 'button', onclick: () => { confirmLoadId = null; renderPrograms(); }, text: (__G("\u0386\u03ba\u03c5\u03c1\u03bf")) }));
     } else {
       actions = h('div', { class: 'pactions' },
-        h('button', {
-          class: 'btn primary', type: 'button',
-          onclick: () => {
-            if (needsLoadConfirm(p)) { confirmLoadId = p.id; renderPrograms(); } else loadProgram(p);
-          },
-          text: (__G("\u0394\u03b5\u03af\u03be\u03b5 \u03c3\u03c4\u03bf \u03c3\u03ce\u03bc\u03b1")),
-        }),
         h('button', { class: 'btn', type: 'button', onclick: () => openForm(p), text: (__G("\u0395\u03c0\u03b5\u03be\u03b5\u03c1\u03b3\u03b1\u03c3\u03af\u03b1")) }),
-        h('button', { class: 'btn danger', type: 'button', onclick: () => { confirmDeleteId = p.id; confirmLoadId = null; renderPrograms(); }, text: (__G("\u0394\u03b9\u03b1\u03b3\u03c1\u03b1\u03c6\u03ae")) }));
+        h('button', { class: 'btn danger', type: 'button', onclick: () => { confirmDeleteId = p.id; renderPrograms(); }, text: (__G("\u0394\u03b9\u03b1\u03b3\u03c1\u03b1\u03c6\u03ae")) }));
     }
 
     const meta = n + (n === 1 ? (" "+__G("\u03ac\u03c3\u03ba\u03b7\u03c3\u03b7")) : (" "+__G("\u03b1\u03c3\u03ba\u03ae\u03c3\u03b5\u03b9\u03c2"))) +
       (unknownCount ? ' · ' + unknownCount + (unknownCount === 1 ? (" "+__G("\u03b4\u03b5\u03bd \u03b1\u03bd\u03b1\u03b3\u03bd\u03c9\u03c1\u03af\u03c3\u03c4\u03b7\u03ba\u03b5")) : (" "+__G("\u03b4\u03b5\u03bd \u03b1\u03bd\u03b1\u03b3\u03bd\u03c9\u03c1\u03af\u03c3\u03c4\u03b7\u03ba\u03b1\u03bd"))) : '');
 
-    return h('article', { class: 'pcard' },
-      h('h3', { text: p.name }),
+    // επιλογή για τον χάρτη: όσα τσεκάρεις εμφανίζονται μαζί με «Δείξε στον χάρτη»
+    const pickId = 'pick-' + p.id;
+    const pick = h('label', { class: 'ppick', for: pickId },
+      h('input', { type: 'checkbox', id: pickId, checked: mapPick.has(p.id), onchange: (e) => { if (e.target.checked) mapPick.add(p.id); else mapPick.delete(p.id); updateShowBtn(); } }),
+      h('span', { text: T('Show on map', 'Στον χάρτη') }));
+    return h('article', { class: 'pcard' + (mapPick.has(p.id) ? ' picked' : '') },
+      h('div', { class: 'phead' }, h('h3', { text: p.name }), pick),
       h('p', { class: 'pmeta', text: meta }),
       chips, actions);
+  }
+
+  // «Δείξε στον χάρτη»: όλες οι ασκήσεις των τσεκαρισμένων προγραμμάτων μαζί στο σώμα
+  let showBtn = null;
+  function updateShowBtn() {
+    if (!showBtn) return;
+    const n = [...mapPick].filter((id) => programs.some((q) => q.id === id)).length;
+    showBtn.disabled = !n;
+    showBtn.textContent = n ? T(`Show on map (${n})`, `Δείξε στον χάρτη (${n})`) : T('Show on map', 'Δείξε στον χάρτη');
+    document.querySelectorAll('#pvList .pcard').forEach((c) => { const cb = c.querySelector('.ppick input'); if (cb) c.classList.toggle('picked', cb.checked); });
   }
 
   /* ---------------------------------------------------------- render */
@@ -416,11 +412,9 @@ var __G=window.__mxG||(s=>s);
       editingId = null; draft = null; saving = false;
     }
 
-    const m = mx();
-    const cur = m ? m.get() : [];
-    const currentUnsaved = cur.length > 0 && !programs.some((q) => keyOf(canonicalNames(q)) === keyOf(cur));
-    $('pvSaveCurrent').hidden = !(loaded && currentUnsaved && !editingId);
+    $('pvSaveCurrent').hidden = true;
     $('pvNew').disabled = !store || editingId === 'new';
+    updateShowBtn();
 
     if (editingId === 'new') root.appendChild(formCard());
     if (!loaded) { root.appendChild(h('p', { class: 'pempty', text: (__G("\u03a6\u03cc\u03c1\u03c4\u03c9\u03c3\u03b7\u2026")) })); return; }
@@ -435,6 +429,10 @@ var __G=window.__mxG||(s=>s);
   document.querySelectorAll('#viewToggle [data-v]').forEach((b) =>
     b.addEventListener('click', () => setView(b.dataset.v, true)));
   $('pvNew').addEventListener('click', () => openForm(null));
+  showBtn = h('button', { type: 'button', class: 'btn primary', id: 'pvShowMap', disabled: true, onclick: () => showOnMap(programs.filter((q) => mapPick.has(q.id)).map((q) => q.id)) });
+  $('pvNew').classList.remove('primary');
+  $('pvNew').parentElement.appendChild(showBtn);
+  updateShowBtn();
   $('pvSaveCurrent').addEventListener('click', () => {
     const m = mx();
     openForm(null, m ? m.get().join('\n') : '');
@@ -445,7 +443,7 @@ var __G=window.__mxG||(s=>s);
   if (mx() && mx().onBack) mx().onBack(() => {
     if (view !== 'programs') return false;
     if (editingId) closeForm();
-    else if (confirmDeleteId || confirmLoadId) { confirmDeleteId = null; confirmLoadId = null; renderPrograms(); }
+    else if (confirmDeleteId) { confirmDeleteId = null; renderPrograms(); }
     else setView('map');
     return true;
   });
@@ -547,7 +545,8 @@ var __G=window.__mxG||(s=>s);
       programs = list;
       loaded = true;
       if (confirmDeleteId && !programs.some((p) => p.id === confirmDeleteId)) confirmDeleteId = null;
-      if (confirmLoadId && !programs.some((p) => p.id === confirmLoadId)) confirmLoadId = null;
+      [...mapPick].forEach((id) => { if (!programs.some((p) => p.id === id)) mapPick.delete(id); });
+      syncMap();
       applyNav();
       renderPrograms();
       notify();

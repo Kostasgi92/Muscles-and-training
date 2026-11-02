@@ -867,6 +867,29 @@ button { cursor: pointer; }
 .rv-mparts li span small { color: var(--ink-2); }
 .rv-mparts b { font-variant-numeric: tabular-nums; }
 .rv-mformula { margin: 6px 0 0; font-size: .78rem; color: var(--ink-2); }
+
+.pcard .phead { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.pcard .phead h3 { margin: 0; }
+.ppick { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; font-size: .82rem; font-weight: 600; color: var(--ink-2); cursor: pointer; padding: 4px 8px; border-radius: 8px; border: 1.5px solid var(--line); background: var(--surface); }
+.ppick input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
+.pcard.picked { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.pcard.picked .ppick { color: var(--ink); border-color: var(--accent); }
+
+.mapreset { top: 12px; right: 12px; }
+.mapreset button { font-weight: 600; }
+.mapreset .mr-short { display: none; }
+.legend { top: 58px; }
+@media (max-width: 600px) {
+  /* στο κινητό: κάτω αριστερά, πάνω από τις στρώσεις (πάνω βρίσκονται η κάμερα και η λεζάντα της κίνησης) */
+  .mapreset { top: auto; right: auto; left: 12px; bottom: 80px; }
+  .mapreset .mr-long { display: none; }
+  .mapreset .mr-short { display: inline; }
+  .legend { top: auto; }
+}
+@media (max-width: 400px) {
+  .viewtoggle button { padding-left: 7px; padding-right: 7px; }
+  .go { padding: 0 11px; }
+}
 </style>
 
 <div class="app" id="app" data-anatomy-bytes="3523496">
@@ -905,6 +928,7 @@ button { cursor: pointer; }
         <div class="bar"><i id="loadBar"></i></div>
         <div id="loadMsg">Φόρτωση ανατομικού μοντέλου · 462.000 τρίγωνα, 172 μύες και οστά</div>
       </div>
+      <div class="overlay mapreset"><div class="seg"><button type="button" id="mapReset" title="Πίσω στο σώμα μόνο του, χωρίς τίποτα επιλεγμένο"><span class="mr-long">✕ Καθαρισμός χάρτη</span><span class="mr-short" aria-hidden="true">✕ Καθαρισμός</span></button></div></div>
       <div class="overlay views">
         <div class="seg" role="group" aria-label="Γωνία θέασης">
           <button type="button" data-view="front">Μπροστά</button>
@@ -913,6 +937,7 @@ button { cursor: pointer; }
           <button type="button" data-view="right">Δεξιά</button>
           <button type="button" data-view="three" aria-label="Επαναφορά κάμερας">↺</button>
         </div>
+
       </div>
       <div class="overlay layers">
         <span class="cap" id="layerCap">Στρώσεις</span>
