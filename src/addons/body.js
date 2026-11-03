@@ -42,7 +42,7 @@
     return {
       profile: { sex: p.sex === 'm' || p.sex === 'f' ? p.sex : '', age: num(p.age), ageOn: isDate(p.ageOn) ? p.ageOn : null, height: num(p.height) },
       entries: (Array.isArray(d.entries) ? d.entries : []).filter((e) => e && isDate(e.date)).map(cleanEntry).filter(hasData),
-      goals: { w: num(g.w), fat: num(g.fat), mus: num(g.mus), date: isDate(g.date) ? g.date : null, setOn: isDate(g.setOn) ? g.setOn : null },
+      goals: { w: num(g.w), fat: num(g.fat), mus: num(g.mus), waist: num(g.waist), date: isDate(g.date) ? g.date : null, setOn: isDate(g.setOn) ? g.setOn : null },
     };
   };
   let data = cleanAll(null);
@@ -171,7 +171,11 @@
   function goalInfo(mt) {
     const g = data.goals;
     const w = mt.W ? mt.W.v : null;
-    const out = { set: !!(g.w || g.fat || g.mus), g };
+    const out = { set: !!(g.w || g.fat || g.mus || g.waist), g };
+    const curWaist = mt.meas.waist ? mt.meas.waist.v : null;
+    // στόχος μέσης μικρότερος από τη σημερινή = λιγότερο κοιλιακό λίπος
+    const waistDown = !!(g.waist && curWaist && g.waist < curWaist - 1);
+    out.dWaist = g.waist && curWaist ? g.waist - curWaist : null;
     if (g.w && g.fat) out.fatKg = (g.w * g.fat) / 100;
     if (g.w && g.mus) out.musKg = (g.w * g.mus) / 100;
     let type = null;
@@ -181,9 +185,9 @@
       const dMk = out.musKg && mt.musKg ? out.musKg - mt.musKg : 0;
       if (dW <= -1.5 || (dF <= -2 && dW <= 0.5)) type = Math.abs(dW) <= 1.5 && dMk > 0.5 ? 'recomp' : 'cut';
       else if (dW >= 1.5) type = 'bulk';
-      else if (dF <= -1 || dMk >= 0.5) type = 'recomp';
+      else if (dF <= -1 || dMk >= 0.5 || waistDown) type = 'recomp';
       else type = 'maintain';
-    } else if (out.set) type = g.w ? null : 'recomp';
+    } else if (out.set) type = g.w ? null : (g.waist && !g.fat && !g.mus ? 'cut' : 'recomp');
     // χωρίς στόχους: τι θα πρότεινε ένας προπονητής από τα δεδομένα (ο στόχος της εφαρμογής είναι η μυϊκή ανάπτυξη)
     if (!type) {
       if (mt.fat != null && mt.fatCat && (mt.fatCat[0] === 'warn' || mt.fatCat[0] === 'high')) type = 'cut';
@@ -282,7 +286,7 @@
       out.push({ kind: 'body', title: T('Add your body data', 'Πρόσθεσε τα στοιχεία σώματος'), text: T('With your age, height, weight and body-fat and muscle percentages, the review also judges whether the plan fits your body and goals.', 'Με την ηλικία, το ύψος, το βάρος και τα ποσοστά λίπους και μυών, η αξιολόγηση κρίνει και αν το πρόγραμμα ταιριάζει στο σώμα και στους στόχους σου.'), actions: [{ type: 'tab', id: 'body' }] });
       return out;
     }
-    if (!(data.goals.w || data.goals.fat || data.goals.mus)) out.push({ kind: 'body', title: T('Set your goals', 'Όρισε τους στόχους σου'), text: T('Add your target weight and body-fat and muscle percentages. The score then checks the plan against your real goal instead of a general one.', 'Πρόσθεσε το βάρος και τα ποσοστά λίπους και μυών που θέλεις. Ο βαθμός τότε ελέγχει το πρόγραμμα με βάση τον δικό σου στόχο, όχι έναν γενικό.'), actions: [{ type: 'tab', id: 'goals' }] });
+    if (!(data.goals.w || data.goals.fat || data.goals.mus || data.goals.waist)) out.push({ kind: 'body', title: T('Set your goals', 'Όρισε τους στόχους σου'), text: T('Add your target weight and body-fat and muscle percentages. The score then checks the plan against your real goal instead of a general one.', 'Πρόσθεσε το βάρος και τα ποσοστά λίπους και μυών που θέλεις. Ο βαθμός τότε ελέγχει το πρόγραμμα με βάση τον δικό σου στόχο, όχι έναν γενικό.'), actions: [{ type: 'tab', id: 'goals' }] });
     if (!f) return out;
     const t = f.type, kcal = mt.tdee;
     const w = mt.W ? mt.W.v : null;
@@ -311,7 +315,7 @@
     if (ms.length) l.push(T('Measurements (cm): ', 'Μετρήσεις (cm): ') + ms.join(', '));
     ['w', 'fat', 'mus', 'waist', 'arm'].forEach((k) => { const r = rate(k); if (r) l.push(`${k}: ${sgn(r.perWeek, 2)}/${T('week', 'εβδ.')} (${nf(r.weeks)} ${T('weeks', 'εβδ.')})`); });
     const g = data.goals;
-    if (g.w || g.fat || g.mus) l.push(T('Goals: ', 'Στόχοι: ') + [g.w ? T(`weight ${nf(g.w)} kg`, `βάρος ${nf(g.w)} kg`) : null, g.fat ? T(`body fat ${nf(g.fat)}%`, `λίπος ${nf(g.fat)}%`) : null, g.mus ? T(`muscle ${nf(g.mus)}%`, `μύες ${nf(g.mus)}%`) : null, g.date ? T(`by ${g.date}`, `έως ${g.date}`) : null].filter(Boolean).join(', '));
+    if (g.w || g.fat || g.mus || g.waist) l.push(T('Goals: ', 'Στόχοι: ') + [g.w ? T(`weight ${nf(g.w)} kg`, `βάρος ${nf(g.w)} kg`) : null, g.fat ? T(`body fat ${nf(g.fat)}%`, `λίπος ${nf(g.fat)}%`) : null, g.mus ? T(`muscle ${nf(g.mus)}%`, `μύες ${nf(g.mus)}%`) : null, g.waist ? T(`waist ${nf(g.waist)} cm`, `μέση ${nf(g.waist)} cm`) : null, g.date ? T(`by ${g.date}`, `έως ${g.date}`) : null].filter(Boolean).join(', '));
     if (f) l.push(T(`Goal type: ${TYPE[f.type][0]}${f.inferred ? ' (inferred)' : ''}, fit to goals ${nf(f.score)}/10`, `Είδος στόχου: ${TYPE[f.type][0]}${f.inferred ? ' (εκτίμηση)' : ''}, ταίριασμα με τους στόχους ${nf(f.score)}/10`));
     return l;
   }
@@ -468,7 +472,7 @@
     const mt = metrics(ctx.sessions);
     const gi = goalInfo(mt);
     host.appendChild(h('p', { class: 'sub', text: T('What you want to reach. The kilos follow from the target weight and percentages; you can type either.', 'Τι θέλεις να πετύχεις. Τα κιλά βγαίνουν από το βάρος-στόχο και τα ποσοστά· μπορείς να γράψεις όποιο από τα δύο.') }));
-    const g = draft.goals || (draft.goals = { w: data.goals.w ?? '', fat: data.goals.fat ?? '', mus: data.goals.mus ?? '', fatKg: '', musKg: '', date: data.goals.date ?? '' });
+    const g = draft.goals || (draft.goals = { w: data.goals.w ?? '', fat: data.goals.fat ?? '', mus: data.goals.mus ?? '', waist: data.goals.waist ?? '', fatKg: '', musKg: '', date: data.goals.date ?? '' });
     const syncKg = () => {
       const w = num(g.w);
       if (w && num(g.fat)) g.fatKg = shown(Math.round(w * num(g.fat)) / 100);
@@ -490,9 +494,10 @@
       if (badNum(g.w, 25, 300)) errs.push(T('target weight 25–300 kg', 'βάρος-στόχος 25–300 kg'));
       if (badNum(g.fat, 3, 70)) errs.push(T('body fat 3–70%', 'λίπος 3–70%'));
       if (badNum(g.mus, 10, 90)) errs.push(T('muscle 10–90%', 'μύες 10–90%'));
+      if (badNum(g.waist, 40, 200)) errs.push(T('waist 40–200 cm', 'μέση 40–200 cm'));
       if (errs.length) { draft.gmsg = T('Check: ', 'Έλεγξε: ') + errs.join(', ') + '.'; return rerender(); }
       if (g.date && (!isDate(g.date) || g.date <= today())) { draft.gmsg = T('The target date must be in the future.', 'Η ημερομηνία-στόχος πρέπει να είναι στο μέλλον.'); return rerender(); }
-      data.goals = { w, fat, mus, date: g.date || null, setOn: today() };
+      data.goals = { w, fat, mus, waist: num(g.waist), date: g.date || null, setOn: today() };
       draft.goals = null; draft.gmsg = T('Goals saved.', 'Οι στόχοι αποθηκεύτηκαν.');
       persist();
     } },
@@ -503,6 +508,7 @@
         field(T('Body fat (kg)', 'Λίπος (kg)'), inputs.fatKg, now(mt.fatKg, ' kg')),
         field(T('Muscle (%)', 'Μύες (%)'), inputs.mus, [now(mt.M && mt.M.v, '%'), MUS_HINT].filter(Boolean).join(' · ')),
         field(T('Muscle (kg)', 'Μύες (kg)'), inputs.musKg, now(mt.musKg, ' kg')),
+        field(T('Waist (cm)', 'Μέση (cm)'), numInput(g.waist, (v) => { g.waist = v; }, { step: '0.5' }), mt.meas.waist ? now(mt.meas.waist.v, ' cm') : T('add a waist measurement in the Body tab', 'πρόσθεσε μέτρηση μέσης στην καρτέλα Σώμα'), 'bd-wide'),
         field(T('By (optional)', 'Έως (προαιρετικά)'), h('input', { type: 'date', value: g.date, min: today(), oninput: (e) => { g.date = e.target.value; } }), null, 'bd-wide')),
       h('button', { class: 'btn primary', type: 'submit', text: T('Save goals', 'Αποθήκευση στόχων') }),
       draft.gmsg ? h('p', { class: 'bd-msg', role: 'status', text: draft.gmsg }) : null);
@@ -528,7 +534,8 @@
         bar(T('Body fat', 'Λίπος'), mt.fat, data.goals.fat, first('fat'), '%'),
         bar(T('Body fat', 'Λίπος'), mt.fatKg, gi.fatKg, null, 'kg'),
         bar(T('Muscle', 'Μύες'), mt.M && mt.M.v, data.goals.mus, first('mus'), '%'),
-        bar(T('Muscle', 'Μύες'), mt.musKg, gi.musKg, null, 'kg')].forEach((b) => b && box.appendChild(b));
+        bar(T('Muscle', 'Μύες'), mt.musKg, gi.musKg, null, 'kg'),
+        bar(T('Waist', 'Μέση'), mt.meas.waist ? mt.meas.waist.v : null, data.goals.waist, first('waist'), 'cm')].forEach((b) => b && box.appendChild(b));
       if (gi.needPerWeek != null && mt.W) {
         const pct = (100 * gi.needPerWeek) / mt.W.v;
         const tooFast = gi.needPerWeek < 0 ? pct < -1 : pct > 0.5;
