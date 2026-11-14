@@ -117,34 +117,53 @@ ${__G('Απάντησε ΜΟΝΟ με έναν πίνακα JSON 3 αντικε�
 
 // Γνώμη προπονητή για όλο το πρόγραμμα, με βάση την ανάλυση της εφαρμογής (ροή κειμένου)
 // again: «Ζήτα νέα γνώμη» — χωρίς την αποθηκευμένη απάντηση των 5 λεπτών
-export async function coachReview(summary, { signal, onText, again = false } = {}) {
+// goal: ο κύριος στόχος του χρήστη (addons/body.js goalType): {type: 'bulk'|'cut'|'maintain', sets, freq}
+export async function coachReview(summary, { signal, onText, again = false, goal = null } = {}) {
   const sample = await getSample();
   if (!sample) throw { code: 'unavailable' };
-  const prompt = T(`You are an experienced personal trainer who specialises in muscle growth (hypertrophy).
-Rules of the review: at least 10 hard sets per muscle group per week (optimal 10–20; small assisting muscles at least 6), each muscle trained twice a week, at most about 10 sets per muscle in one session, push/pull and quads/hamstrings balance. The primary muscle of an exercise counts 1 set, a secondary muscle ½.
+  const type = goal?.type === 'cut' || goal?.type === 'maintain' ? goal.type : 'bulk';
+  const k = goal?.sets ?? 1;
+  const n = Math.round(10 * k), small = Math.max(3, Math.round(6 * k));
+  const twice = (goal?.freq ?? 2) >= 2;
+  const count = T('The primary muscle of an exercise counts 1 set, a secondary muscle ½.', 'Κύριος μυς άσκησης = 1 σετ, βοηθητικός = ½.');
+  const [role, rules, tip] = type === 'cut' ? [
+    T('You are an experienced personal trainer who specialises in losing fat without losing muscle. The user\'s primary goal is fat loss.', 'Είσαι έμπειρος personal trainer με εξειδίκευση στην απώλεια λίπους χωρίς απώλεια μυών. Ο κύριος στόχος του χρήστη είναι η απώλεια λίπους.'),
+    T('Rules of the review: keep the volume of a growth plan, because cutting sets in a calorie deficit costs muscle (at least 10 hard sets per muscle group per week, optimal 10–20; small assisting muscles at least 6), each muscle trained twice a week, 3 or more sessions a week, at most about 10 sets per muscle in one session, loads that are held rather than raised, push/pull and quads/hamstrings balance. Do not suggest fewer sets or lighter weights because of the diet.', 'Κανόνες της αξιολόγησης: ο όγκος μένει όπως σε πρόγραμμα ανάπτυξης, γιατί η μείωση των σετ σε θερμιδικό έλλειμμα κοστίζει μύες (≥10 σκληρά σετ την εβδομάδα ανά μυϊκή ομάδα, βέλτιστο 10–20, μικροί βοηθητικοί μύες ≥6), κάθε μυς 2 φορές την εβδομάδα, 3 ή περισσότερες προπονήσεις την εβδομάδα, έως ~10 σετ ανά μυ σε μία προπόνηση, φορτία που κρατιούνται (όχι απαραίτητα αύξηση), ισορροπία ώθησης/έλξης και τετρακέφαλων/οπίσθιων. Μην προτείνεις λιγότερα σετ ή ελαφρύτερα κιλά λόγω δίαιτας.'),
+    T('One tip on holding the loads or on eating for fat loss (weight down 0.5–1% a week, protein about 2–2.4 g per kg).', 'Μία συμβουλή για τη διατήρηση των φορτίων ή για τη διατροφή στην απώλεια λίπους (βάρος −0,5–1% την εβδομάδα, πρωτεΐνη περίπου 2–2,4 g ανά κιλό).'),
+  ] : type === 'maintain' ? [
+    T('You are an experienced personal trainer. The user\'s primary goal is maintenance: keeping the muscle and strength they have with no more training than that needs.', 'Είσαι έμπειρος personal trainer. Ο κύριος στόχος του χρήστη είναι η διατήρηση: να κρατήσει τους μύες και τη δύναμη που έχει, χωρίς περισσότερη προπόνηση από όση χρειάζεται.'),
+    T(`Rules of the review: about ${n} hard sets per muscle group per week are enough (small assisting muscles about ${small}), ${twice ? 'each muscle trained twice a week' : 'training each muscle once a week is enough'}, as long as the loads are held; at most about 10 sets per muscle in one session; push/pull and quads/hamstrings balance. Do not push for more volume than maintenance needs.`, `Κανόνες της αξιολόγησης: περίπου ${n} σκληρά σετ την εβδομάδα ανά μυϊκή ομάδα αρκούν (μικροί βοηθητικοί μύες περίπου ${small}), ${twice ? 'κάθε μυς 2 φορές την εβδομάδα' : 'αρκεί κάθε μυς 1 φορά την εβδομάδα'}, εφόσον τα φορτία κρατιούνται· έως ~10 σετ ανά μυ σε μία προπόνηση· ισορροπία ώθησης/έλξης και τετρακέφαλων/οπίσθιων. Μην ζητάς περισσότερο όγκο από όσο χρειάζεται η διατήρηση.`),
+    T('One tip on holding the loads or on staying consistent.', 'Μία συμβουλή για τη διατήρηση των φορτίων ή για τη συνέπεια.'),
+  ] : [
+    T('You are an experienced personal trainer who specialises in muscle growth (hypertrophy). The user\'s primary goal is muscle gain.', 'Είσαι έμπειρος personal trainer με εξειδίκευση στη μυϊκή ανάπτυξη (υπερτροφία). Ο κύριος στόχος του χρήστη είναι η μυϊκή ανάπτυξη.'),
+    T('Rules of the review: at least 10 hard sets per muscle group per week (optimal 10–20; small assisting muscles at least 6), each muscle trained twice a week, at most about 10 sets per muscle in one session, loads that go up over time, push/pull and quads/hamstrings balance.', 'Κανόνες της αξιολόγησης: ≥10 σκληρά σετ την εβδομάδα ανά μυϊκή ομάδα (βέλτιστο 10–20, μικροί βοηθητικοί μύες ≥6), κάθε μυς 2 φορές την εβδομάδα, έως ~10 σετ ανά μυ σε μία προπόνηση, φορτία που ανεβαίνουν με τον καιρό, ισορροπία ώθησης/έλξης και τετρακέφαλων/οπίσθιων.'),
+    T('One tip on progressive overload or effort.', 'Μία συμβουλή για προοδευτική επιβάρυνση ή ένταση.'),
+  ];
+  const prompt = T(`${role}
+${rules} ${count}
 
 The analysis of the user's program:
 ${summary.slice(0, 12000)}
 
-If the analysis includes body data and goals (age, weight, body fat, muscle, measurements, goal type), judge the program for that goal and person, and mention them where relevant (for example calories or protein for fat loss or muscle gain, recovery with age).
+Judge the program for the primary goal stated in the analysis. If the analysis includes body data and targets (age, weight, body fat, muscle, measurements, target weight), judge it for this person too and mention them where relevant (for example calories or protein, recovery with age).
 
 Write in English, briefly (at most 170 words), as plain text without tables or bold:
-- One sentence with your overall assessment.
-- The 3 most important changes, each with a specific exercise, number of sets and which session it goes in.
-- One tip on progressive overload or effort.
+- One sentence with your overall assessment for this goal.
+- The 3 most important changes (fewer if the program already fits the goal), each with a specific exercise, number of sets and which session it goes in.
+- ${tip}
 Put each point on its own line starting with "- ".`,
-  `Είσαι έμπειρος personal trainer με εξειδίκευση στη μυϊκή ανάπτυξη (υπερτροφία).
-Κανόνες της αξιολόγησης: ≥10 σκληρά σετ την εβδομάδα ανά μυϊκή ομάδα (βέλτιστο 10–20, μικροί βοηθητικοί μύες ≥6), κάθε μυς 2 φορές την εβδομάδα, έως ~10 σετ ανά μυ σε μία προπόνηση, ισορροπία ώθησης/έλξης και τετρακέφαλων/οπίσθιων. Κύριος μυς άσκησης = 1 σετ, βοηθητικός = ½.
+  `${role}
+${rules} ${count}
 
 Η ανάλυση του προγράμματος του χρήστη:
 ${summary.slice(0, 12000)}
 
-Αν η ανάλυση περιλαμβάνει στοιχεία σώματος και στόχους (ηλικία, βάρος, λίπος, μύες, περιφέρειες, είδος στόχου), κρίνε το πρόγραμμα για αυτόν τον στόχο και αυτό το άτομο και ανέφερέ τα όπου έχει σημασία (π.χ. θερμίδες ή πρωτεΐνη για απώλεια λίπους ή ανάπτυξη, αποκατάσταση ανάλογα με την ηλικία).
+Κρίνε το πρόγραμμα για τον κύριο στόχο που αναφέρει η ανάλυση. Αν η ανάλυση περιλαμβάνει στοιχεία σώματος και αριθμητικούς στόχους (ηλικία, βάρος, λίπος, μύες, περιφέρειες, βάρος-στόχος), κρίνε το και για αυτό το άτομο και ανέφερέ τα όπου έχει σημασία (π.χ. θερμίδες ή πρωτεΐνη, αποκατάσταση ανάλογα με την ηλικία).
 
 Γράψε στα ελληνικά, σύντομα (έως 170 λέξεις), σε απλό κείμενο χωρίς πίνακες και χωρίς έντονα γράμματα:
-- Μία πρόταση με τη συνολική εκτίμηση.
-- Τις 3 πιο σημαντικές αλλαγές, η καθεμία με συγκεκριμένη άσκηση, σετ και σε ποια προπόνηση να μπει.
-- Μία συμβουλή για προοδευτική επιβάρυνση ή ένταση.
+- Μία πρόταση με τη συνολική εκτίμηση για αυτόν τον στόχο.
+- Τις 3 πιο σημαντικές αλλαγές (λιγότερες αν το πρόγραμμα ήδη ταιριάζει στον στόχο), η καθεμία με συγκεκριμένη άσκηση, σετ και σε ποια προπόνηση να μπει.
+- ${tip}
 Κάθε σημείο σε ξεχωριστή γραμμή που ξεκινά με «- ».`);
   const { text } = await sample(prompt, { signal, onText, modelTier: 'default', ...(again ? { cache: false } : {}) });
   return text;

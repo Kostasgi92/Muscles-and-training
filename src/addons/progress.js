@@ -5,13 +5,19 @@
      pid = the program (training day) it belongs to · ex = exercise id, or "n:<name>" for a name the app does not recognise.
      Levels without pid (older logs, or logged before the exercise was in a program) count for every day with that exercise.
    The newest level of an exercise on a day is its current one.
+   What counts as good depends on the primary goal (Goals tab): muscle gain = the loads keep going up;
+   fat loss or maintenance = the loads hold ("holding"), and only a lower level than the one before ("dropped") costs score.
    Stored in this browser (localStorage "mx.log") and, when available, privately per user in the artifact db (doc "__log"). */
 (() => {
   'use strict';
   const EL = window.__mxLang === 'el';
   const T = (en, el) => (EL ? el : en);
   const KEY = 'mx.log';
-  const READY_DAYS = 14, STALL_DAYS = 28;
+  const READY_DAYS = 14, STALL_DAYS = 28, DROP_DAYS = 56;
+  // Ο κύριος στόχος (addons/body.js, καρτέλα Στόχοι). Με μυϊκή ανάπτυξη τα φορτία πρέπει να ανεβαίνουν. Με απώλεια λίπους
+  // ή διατήρηση (hold) επιτυχία είναι να κρατιούνται: ένα επίπεδο που δεν αλλάζει μετράει πλήρως, μια πτώση όχι.
+  const goalT = () => { try { return window.__mxBody && window.__mxBody.goalType ? window.__mxBody.goalType() : null; } catch (e) { return null; } };
+  const holdMode = () => { const g = goalT(); return !!(g && g.hold); };
   const LOWER = ['quads', 'hamstrings', 'glute_max', 'glute_med', 'calves', 'erectors', 'adductors', 'iliopsoas'];
 
   /* ------------------------------------------------------------ store */
@@ -108,6 +114,17 @@
     }
     const pa = power(a), pb = power(b);
     return Math.abs(pa - pb) <= pb * 0.002 + 1e-9 ? 0 : pa - pb;
+  }
+  // έπεσε το επίπεδο σε σχέση με το προηγούμενο; Μία επανάληψη λιγότερη σε κάθε σετ (ή έως 10% λιγότερος χρόνος)
+  // θεωρείται διακύμανση, όχι πτώση.
+  function dropped(cur, prev, mode) {
+    if (compare(cur, prev, mode) >= 0) return false;
+    const bw = (x) => !isTime(x) && x.every((s) => s.kg === 0);
+    if (isTime(cur) !== isTime(prev) || bw(cur) !== bw(prev)) return true;
+    const pa = power(cur), pb = power(prev);
+    if (isTime(cur)) return pa < pb * 0.9;
+    if (bw(cur)) return pb - pa > 1;
+    return pa < pb * 0.97;
   }
   // ίδιος αριθμός σετ με το πρόγραμμα: κόβει ή επαναλαμβάνει το τελευταίο σετ
   const fit = (sets, n) => Array.from({ length: n }, (_, i) => ({ ...(sets[Math.min(i, sets.length - 1)] || { kg: 0, reps: 8 }) }));
@@ -242,15 +259,22 @@
     if (!h.length) return null;
     const cur = h[h.length - 1];
     const days = daysSince(cur.since);
-    const kind = days >= STALL_DAYS ? 'stalled' : days >= READY_DAYS ? 'ready' : 'fresh';
     const prev = h.length > 1 ? h[h.length - 2] : null;
-    const raised = !!prev && compare(cur.sets, prev.sets, modeOf(occ.ex)) > 0;
     const mode = modeOf(occ.ex);
+    const raised = !!prev && compare(cur.sets, prev.sets, mode) > 0;
+    // απώλεια λίπους/διατήρηση: «κρατιέται» ή «έπεσε» (μια πτώση παλιότερη από 8 εβδομάδες είναι πια το νέο σου επίπεδο)
+    const hold = holdMode();
+    const fell = hold && !!prev && days <= DROP_DAYS && dropped(cur.sets, prev.sets, mode);
+    const kind = hold ? (fell ? 'dropped' : 'holding') : days >= STALL_DAYS ? 'stalled' : days >= READY_DAYS ? 'ready' : 'fresh';
     const t = nextTarget(cur, occ.sets, exOf(occ.ex), mode);
-    return { cur, prev, days, kind, raised, history: h, readyOn: READY_DAYS - days, target: t.sets, harder: t.harder, mode };
+    return { cur, prev, days, kind, hold, raised, history: h, readyOn: READY_DAYS - days, target: t.sets, harder: t.harder, mode };
   }
-  // 0…1: πόσο καλά προχωράει (null = χωρίς καταγραφή)
-  function healthOf(st) { return !st ? null : st.raised || st.kind === 'fresh' ? 1 : st.kind === 'ready' ? 0.7 : st.days >= 42 ? 0.1 : 0.4; }
+  // 0…1: πόσο καλά πάει για τον στόχο (null = χωρίς καταγραφή). Ανάπτυξη: ανεβαίνει ή είναι πρόσφατο. Διατήρηση φορτίων: κρατιέται.
+  function healthOf(st) {
+    if (!st) return null;
+    if (st.hold) return st.kind === 'dropped' ? 0.5 : 1;
+    return st.raised || st.kind === 'fresh' ? 1 : st.kind === 'ready' ? 0.7 : st.days >= 42 ? 0.1 : 0.4;
+  }
   const health = (pid, exId, sets) => healthOf(status({ pid, key: exId, ex: exId, sets: sets || 3 }));
 
   function add(occ, sets, since) {
@@ -280,14 +304,17 @@
       tot += w;
       const hv = healthOf(st);
       if (hv != null) { logged += w; hsum += w * hv; }
-      items.push({ ex: it.ex, pid: p.id, day: p.name, name: exName(ex), kind: st ? st.kind : 'none', days: st ? st.days : 0, target: st ? setsText(st.target) : '', cur: st ? setsText(st.cur.sets) : '', sets: it.sets, w });
+      items.push({ ex: it.ex, pid: p.id, day: p.name, name: exName(ex), kind: st ? st.kind : 'none', days: st ? st.days : 0, target: st ? setsText(st.target) : '', cur: st ? setsText(st.cur.sets) : '', prev: st && st.prev ? setsText(st.prev.sets) : '', sets: it.sets, w });
     }));
     const score = tot ? 10 * (0.5 * (logged / tot) + 0.5 * (logged ? hsum / logged : 0)) : 0;
+    const g = goalT();
     return {
       score, items, n: items.length,
+      hold: !!(g && g.hold), goal: g ? g.type : 'bulk',
       logged: items.filter((x) => x.kind !== 'none').length,
       ready: items.filter((x) => x.kind === 'ready'),
       stalled: items.filter((x) => x.kind === 'stalled'),
+      dropped: items.filter((x) => x.kind === 'dropped'),
       unlogged: items.filter((x) => x.kind === 'none').sort((a, b) => b.w - a.w),
     };
   }
@@ -296,20 +323,28 @@
   function tips(ov) {
     const out = [];
     if (!ov || !ov.n) return out;
+    // απώλεια λίπους/διατήρηση: δεν ζητάμε αύξηση· μιλάμε μόνο όταν ένα φορτίο πέφτει
+    if (ov.dropped.length) out.push({ kind: 'overload', title: T(`${ov.dropped.length} ${ov.dropped.length === 1 ? 'lift has' : 'lifts have'} dropped`, `${ov.dropped.length} ${ov.dropped.length === 1 ? 'άσκηση έπεσε' : 'ασκήσεις έπεσαν'}`),
+      text: T(`Your latest level is lower than the one before on ${names(ov.dropped, 3)}. `, `Το τελευταίο επίπεδο είναι χαμηλότερο από το προηγούμενο σε: ${names(ov.dropped, 3)}. `)
+        + (ov.goal === 'cut' ? T('A small drop can happen late in a diet, but if it goes on you are losing muscle: eat a little more (a smaller deficit) and sleep more before you take weight off the bar or cut sets.', 'Μια μικρή πτώση μπορεί να συμβεί προς το τέλος μιας δίαιτας, αλλά αν συνεχιστεί χάνεις μύες: φάε λίγο περισσότερο (μικρότερο έλλειμμα) και κοιμήσου περισσότερο πριν βγάλεις κιλά από τη μπάρα ή κόψεις σετ.')
+          : T('For maintenance the loads have to hold: work back up to your previous level, and check your sleep and food.', 'Στη διατήρηση τα φορτία πρέπει να κρατιούνται: γύρνα σιγά σιγά στο προηγούμενο επίπεδο και έλεγξε ύπνο και φαγητό.')),
+      actions: [{ type: 'progress', ex: ov.dropped[0].ex, pid: ov.dropped[0].pid }] });
     if (ov.stalled.length) out.push({ kind: 'overload', title: T(`${ov.stalled.length} ${ov.stalled.length === 1 ? 'lift has' : 'lifts have'} stalled`, `${ov.stalled.length} ${ov.stalled.length === 1 ? 'άσκηση έχει' : 'ασκήσεις έχουν'} κολλήσει`),
       text: T(`No progression for 4+ weeks on ${names(ov.stalled, 3)}. Add weight or a rep (next: ${ov.stalled[0].target}), or take a lighter week and rebuild.`, `Καμία πρόοδος εδώ και 4+ εβδομάδες σε: ${names(ov.stalled, 3)}. Πρόσθεσε κιλά ή επανάληψη (επόμενο: ${ov.stalled[0].target}) ή κάνε μια ελαφριά εβδομάδα και ξαναχτίσε.`),
       actions: [{ type: 'progress', ex: ov.stalled[0].ex, pid: ov.stalled[0].pid }] });
     if (ov.ready.length) out.push({ kind: 'overload', title: T(`Time to progress: ${names(ov.ready, 2)}`, `Ώρα για αύξηση: ${names(ov.ready, 2)}`),
       text: T(`You have held the same load for 2+ weeks. If every set felt clean, go to ${ov.ready[0].target}.`, `Κρατάς το ίδιο φορτίο 2+ εβδομάδες. Αν όλα τα σετ ήταν καθαρά, πήγαινε σε ${ov.ready[0].target}.`),
       actions: [{ type: 'progress', ex: ov.ready[0].ex, pid: ov.ready[0].pid }] });
-    if (ov.unlogged.length) out.push({ kind: 'overload', title: ov.logged ? T(`${ov.unlogged.length} ${ov.unlogged.length === 1 ? 'exercise has' : 'exercises have'} no logged weights`, `${ov.unlogged.length} ${ov.unlogged.length === 1 ? 'άσκηση χωρίς' : 'ασκήσεις χωρίς'} καταγραφή κιλών`) : T('Start tracking progressive overload', 'Ξεκίνα την καταγραφή προόδου φορτίου'),
-      text: T(`Log the weight and reps of each set and the start date for ${names(ov.unlogged, 3)}. Without it the app cannot tell you when to move up, and the muscles these exercises train lose part of their score.`, `Κατέγραψε τα κιλά και τις επαναλήψεις κάθε σετ και την ημερομηνία έναρξης για: ${names(ov.unlogged, 3)}. Χωρίς αυτά η εφαρμογή δεν μπορεί να σου πει πότε να ανέβεις και οι μύες που δουλεύουν αυτές οι ασκήσεις χάνουν μέρος του βαθμού τους.`),
+    if (ov.unlogged.length) out.push({ kind: 'overload', title: ov.logged ? T(`${ov.unlogged.length} ${ov.unlogged.length === 1 ? 'exercise has' : 'exercises have'} no logged weights`, `${ov.unlogged.length} ${ov.unlogged.length === 1 ? 'άσκηση χωρίς' : 'ασκήσεις χωρίς'} καταγραφή κιλών`) : ov.hold ? T('Start logging your loads', 'Ξεκίνα την καταγραφή των φορτίων σου') : T('Start tracking progressive overload', 'Ξεκίνα την καταγραφή προόδου φορτίου'),
+      text: T(`Log the weight and reps of each set and the start date for ${names(ov.unlogged, 3)}. ${ov.hold ? 'Without it the app cannot tell whether you are holding your loads' : 'Without it the app cannot tell you when to move up'}, and the muscles these exercises train lose part of their score.`, `Κατέγραψε τα κιλά και τις επαναλήψεις κάθε σετ και την ημερομηνία έναρξης για: ${names(ov.unlogged, 3)}. ${ov.hold ? 'Χωρίς αυτά η εφαρμογή δεν μπορεί να δει αν κρατάς τα φορτία σου' : 'Χωρίς αυτά η εφαρμογή δεν μπορεί να σου πει πότε να ανέβεις'} και οι μύες που δουλεύουν αυτές οι ασκήσεις χάνουν μέρος του βαθμού τους.`),
       actions: [{ type: 'progress', ex: ov.unlogged[0].ex, pid: ov.unlogged[0].pid }] });
     return out;
   }
   function coachLines(ov) {
     if (!ov || !ov.n) return [];
-    const l = [T(`Progressive overload ${Math.round(ov.score * 10) / 10}/10: ${ov.logged} of ${ov.n} exercises logged.`, `Πρόοδος φορτίου ${Math.round(ov.score * 10) / 10}/10: ${ov.logged} από ${ov.n} ασκήσεις καταγεγραμμένες.`)];
+    const l = [ov.hold
+      ? T(`Loads held ${Math.round(ov.score * 10) / 10}/10 (with this goal a load that holds counts in full, a drop does not): ${ov.logged} of ${ov.n} exercises logged.`, `Διατήρηση φορτίων ${Math.round(ov.score * 10) / 10}/10 (με αυτόν τον στόχο ένα φορτίο που κρατιέται μετράει πλήρως, μια πτώση όχι): ${ov.logged} από ${ov.n} ασκήσεις καταγεγραμμένες.`)
+      : T(`Progressive overload ${Math.round(ov.score * 10) / 10}/10: ${ov.logged} of ${ov.n} exercises logged.`, `Πρόοδος φορτίου ${Math.round(ov.score * 10) / 10}/10: ${ov.logged} από ${ov.n} ασκήσεις καταγεγραμμένες.`)];
     ov.items.filter((x) => x.kind !== 'none').forEach((x) => l.push(`${label(x)}: ${x.cur}, ${x.days} ${T('days at this level', 'μέρες σε αυτό το φορτίο')} (${x.kind})`));
     if (ov.unlogged.length) l.push(T('Not logged: ', 'Χωρίς καταγραφή: ') + ov.unlogged.map(label).join(', '));
     return l;
@@ -328,7 +363,7 @@
     kids.flat().forEach((c) => { if (c != null && c !== false) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
     return e;
   }
-  const stLabel = { fresh: T('On track', 'Στην ώρα'), ready: T('Ready to progress', 'Έτοιμος για αύξηση'), stalled: T('Stalled', 'Στασιμότητα') };
+  const stLabel = { fresh: T('On track', 'Στην ώρα'), ready: T('Ready to progress', 'Έτοιμος για αύξηση'), stalled: T('Stalled', 'Στασιμότητα'), holding: T('Holding', 'Κρατιέται'), dropped: T('Dropped', 'Έπεσε') };
   const perWeekText = (p) => (p.active === false ? T('not in the week', 'εκτός εβδομάδας') : T(`${p.perWeek}× a week`, `${p.perWeek}× την εβδομάδα`));
 
   /* ------------------------------------------------------------ Progress tab: ίδιες μέρες, ασκήσεις και σετ με την καρτέλα Προγράμματα */
@@ -397,8 +432,18 @@
         box.appendChild(h('p', { class: 'pg-sub', text: T(`since ${fmtDate(st.cur.since)} · ${st.days} ${st.days === 1 ? 'day' : 'days'} at this level`, `από ${fmtDate(st.cur.since)} · ${st.days} ${st.days === 1 ? 'μέρα' : 'μέρες'} σε αυτό το επίπεδο`) }));
         if (st.cur.sets.length !== occ.sets) box.appendChild(h('p', { class: 'pg-sub', text: T(`Logged with ${st.cur.sets.length} ${setsWord(st.cur.sets.length)}; the Programs tab now has ${occ.sets}.`, `Καταγράφηκε με ${st.cur.sets.length} σετ· η καρτέλα Προγράμματα έχει τώρα ${occ.sets}.`) }));
         const tgt = setsText(st.target);
+        const cut = st.hold && (goalT() || {}).type === 'cut';
         let next;
-        if (st.harder) {
+        if (st.kind === 'dropped') {
+          const was = setsText(st.prev.sets);
+          next = cut
+            ? T(`Lower than your previous level (${was}). A small drop can happen late in a diet; if it goes on, eat a little more (a smaller deficit) and work back up to it.`, `Χαμηλότερα από το προηγούμενο επίπεδο (${was}). Μια μικρή πτώση μπορεί να συμβεί προς το τέλος μιας δίαιτας· αν συνεχιστεί, φάε λίγο περισσότερο (μικρότερο έλλειμμα) και ξανανέβα σε αυτό.`)
+            : T(`Lower than your previous level (${was}). For maintenance the loads have to hold: work back up to it.`, `Χαμηλότερα από το προηγούμενο επίπεδο (${was}). Στη διατήρηση τα φορτία πρέπει να κρατιούνται: ξανανέβα σε αυτό.`);
+        } else if (st.kind === 'holding') {
+          next = (cut ? T('Hold this level: keeping your loads while you lose fat is what keeps your muscle.', 'Κράτα αυτό το επίπεδο: όσο χάνεις λίπος, τα ίδια φορτία είναι αυτό που κρατά τους μύες σου.')
+            : T('Hold this level: with the same loads you keep your muscle, even on less training.', 'Κράτα αυτό το επίπεδο: με τα ίδια φορτία κρατάς τους μύες σου, ακόμα και με λιγότερη προπόνηση.'))
+            + (st.harder ? '' : T(` If every set feels easy you can still move up to ${tgt}.`, ` Αν όλα τα σετ είναι εύκολα, μπορείς και να ανέβεις σε ${tgt}.`));
+        } else if (st.harder) {
           next = mode === 'time' || isTime(st.cur.sets)
             ? T('You hold 60 seconds on every set: instead of longer holds, move to a harder variation (side plank, feet on a bench, or hands further forward).', 'Κρατάς 60 δευτερόλεπτα σε κάθε σετ: αντί για μεγαλύτερη διάρκεια, πέρασε σε δυσκολότερη παραλλαγή (πλάγια σανίδα, πόδια σε πάγκο ή χέρια πιο μπροστά).')
             : T('20+ reps on every set: add weight (switch on “Add weight” below) or move to a harder variation.', '20+ επαναλήψεις σε κάθε σετ: πρόσθεσε βάρος (ενεργοποίησε «Με επιπλέον βάρος» παρακάτω) ή πέρασε σε δυσκολότερη παραλλαγή.');
@@ -475,7 +520,9 @@
         h('button', { class: 'btn primary', type: 'submit', text: st ? T('Save new level', 'Αποθήκευση νέου επιπέδου') : T('Save level', 'Αποθήκευση επιπέδου') }));
       box.appendChild(form);
       if (d.err) { box.appendChild(h('p', { class: 'pg-err', role: 'alert', text: d.err })); d.err = ''; }
-      box.appendChild(h('p', { class: 'pg-hint', text: T(`Add a new level each time you move up. After ${READY_DAYS} days at one level the app tells you it is time to progress.`, `Πρόσθεσε νέο επίπεδο κάθε φορά που ανεβαίνεις. Μετά από ${READY_DAYS} μέρες στο ίδιο επίπεδο η εφαρμογή σου λέει πότε να ανέβεις.`) }));
+      box.appendChild(h('p', { class: 'pg-hint', text: holdMode()
+        ? T('Add a new level whenever your weight or reps change. With your goal, a level that holds counts in full; a drop lowers the score.', 'Πρόσθεσε νέο επίπεδο κάθε φορά που αλλάζουν τα κιλά ή οι επαναλήψεις σου. Με τον στόχο σου, ένα επίπεδο που κρατιέται μετράει πλήρως· μια πτώση χαμηλώνει τον βαθμό.')
+        : T(`Add a new level each time you move up. After ${READY_DAYS} days at one level the app tells you it is time to progress.`, `Πρόσθεσε νέο επίπεδο κάθε φορά που ανεβαίνεις. Μετά από ${READY_DAYS} μέρες στο ίδιο επίπεδο η εφαρμογή σου λέει πότε να ανέβεις.`) }));
       if (st) {
         const items = st.history.slice().reverse().map((e, i, arr) => {
           const prev = arr[i + 1];
@@ -505,7 +552,8 @@
 .pg-fixed{background:var(--surface);font-variant-numeric:tabular-nums}
 .pg-st.ready{background:var(--second-soft);border-color:var(--second)}
 .pg-st.stalled{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
-.pg-st.fresh{background:var(--surface-2)}
+.pg-st.fresh,.pg-st.holding{background:var(--surface-2)}
+.pg-st.dropped{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
 .pg-box{border:1px solid var(--line);border-radius:12px;background:var(--surface-2);padding:12px}
 .pg-cur{font-size:1.05rem;font-weight:700;margin:0;font-variant-numeric:tabular-nums}
 .pg-sub{margin:2px 0 0;font-size:.84rem;color:var(--ink-2)}
@@ -584,7 +632,8 @@
   function refreshCards() {
     const m = window.__mxProgram;
     const progs = m && m.programs ? m.programs() : [];
-    const s = JSON.stringify([m && m.shown ? m.shown() : [], progs.map((p) => [p.id, p.name, p.items.map((it) => [it.ex, it.sets])])]);
+    // και ο κύριος στόχος: αλλάζει το τι δείχνει η κάρτα (αύξηση ή διατήρηση φορτίων)
+    const s = JSON.stringify([holdMode(), m && m.shown ? m.shown() : [], progs.map((p) => [p.id, p.name, p.items.map((it) => [it.ex, it.sets])])]);
     if (s === lastProgSig) return;
     lastProgSig = s;
     document.querySelectorAll('#panel .pg-holder').forEach((holder) => { if (holder.__ex && !holder.querySelector('input:focus')) mountCard(holder, holder.__ex); });

@@ -371,6 +371,9 @@ button { cursor: pointer; }
   color: var(--ink);
 }
 .tag.ai { border-color: var(--accent); color: var(--accent); }
+/* ο κύριος στόχος στην κεφαλίδα της αξιολόγησης: ανοίγει την καρτέλα «Στόχοι» */
+.tagbtn { background: var(--surface-2); font-weight: 600; cursor: pointer; }
+@media (hover: hover) { .tagbtn:hover { border-color: var(--accent); color: var(--accent); } }
 .panel h2 {
   font-family: var(--font-display);
   font-weight: 800;

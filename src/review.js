@@ -1,4 +1,8 @@
-// Αξιολόγηση προγράμματος για υπερτροφία (μυϊκή ανάπτυξη).
+// Αξιολόγηση προγράμματος με βάση τον κύριο στόχο του χρήστη: μυϊκή ανάπτυξη (προεπιλογή), απώλεια λίπους ή
+// διατήρηση (addons/body.js goalType). Οι κανόνες παρακάτω είναι της ανάπτυξης· ο στόχος αλλάζει:
+//  • Απώλεια λίπους: ίδια σετ και συχνότητα (η μείωση του όγκου σε έλλειμμα κοστίζει μύες)· αντί για αύξηση φορτίων
+//    μετράει η διατήρησή τους και οι περιφέρειες δεν χρειάζεται να μεγαλώνουν.
+//  • Διατήρηση: ~60% των σετ και 1 φορά την εβδομάδα ανά μυ αρκούν, όσο τα φορτία κρατιούνται.
 //
 // Κανόνες (όπως θα τους έβαζε ένας προπονητής, με βάση τη σύγχρονη έρευνα):
 //  • Μετράμε «σκληρά» σετ: 6–30 επαναλήψεις, 0–3 επαναλήψεις πριν από την αποτυχία.
@@ -81,8 +85,6 @@ export function roleOf(ex, ids) {
   return 0;
 }
 
-// σετ που χρειάζεται ένας μυς ανά στόχο, ως ποσοστό του κανόνα των 10 (απώλεια λίπους/διατήρηση: όγκος συντήρησης)
-export const GOAL_SETS = { cut: 0.7, maintain: 0.6, recomp: 1, bulk: 1, build: 1 };
 // άσκηση «κορμού»: όλοι οι κύριοι μύες της είναι κοιλιακοί/κορμός/καμπτήρες ισχίου
 const CORE_IDS = ['rectus_abd', 'ext_oblique', 'int_oblique', 'transversus', 'quadratus_lumb', 'iliopsoas'];
 const isCoreEx = (ex) => ex.p.length > 0 && ex.p.every((t) => CORE_IDS.some((c) => t === c || t.startsWith(c + '.')));
@@ -95,13 +97,14 @@ export const maxOf = (m) => m.max ?? RULES.max;
 export const capOf = (m) => m.cap ?? RULES.sessionCap;
 export const minOf = (m) => m.min ?? (m.w <= 1 ? RULES.minorMin : RULES.min);
 export const volScore = (V, min = RULES.min, max = RULES.max) => (V <= 0 ? 0 : V < min ? (10 * V) / min : V <= max ? 10 : Math.max(6, 10 - (V - max) * 0.25));
-export const freqScore = (hits, V) => (V <= 0 ? 0 : hits >= RULES.freqTarget ? 10 : hits === 1 ? 5 : 3);
+// fq: πόσες φορές την εβδομάδα θέλει ο μυς με τον στόχο του χρήστη (ανάπτυξη/απώλεια λίπους 2, διατήρηση 1)
+export const freqScore = (hits, V, fq = RULES.freqTarget) => (V <= 0 ? 0 : hits >= fq ? 10 : hits === 1 ? 5 : 3);
 export const distScore = (maxS, cap = RULES.sessionCap) => (maxS <= cap ? 10 : Math.max(4, 10 - (maxS - cap) * 0.75));
 
-export function muscleScore(V, hits, maxS, min = RULES.min, max = RULES.max, cap = RULES.sessionCap) {
+export function muscleScore(V, hits, maxS, min = RULES.min, max = RULES.max, cap = RULES.sessionCap, fq = RULES.freqTarget) {
   if (V <= 0) return 0;
   const k = Math.min(1, V / min);
-  return Math.min(10, 0.7 * volScore(V, min, max) + k * (0.25 * freqScore(hits, V) + 0.05 * distScore(maxS, cap)));
+  return Math.min(10, 0.7 * volScore(V, min, max) + k * (0.25 * freqScore(hits, V, fq) + 0.05 * distScore(maxS, cap)));
 }
 
 export function bandOf(V, score) {
@@ -115,12 +118,13 @@ export function bandOf(V, score) {
 
 export const bandForScore = (s) => (s <= 0 ? 'none' : s >= 9 ? 'top' : s >= 7 ? 'good' : s >= 4 ? 'mid' : 'low');
 
-export function verdict(score) {
+// goalType: 'bulk' (μυϊκή ανάπτυξη) | 'cut' (απώλεια λίπους) | 'maintain' (διατήρηση)
+export function verdict(score, goalType = 'bulk') {
   if (score >= 9) return T('Excellent program', 'Άριστο πρόγραμμα');
   if (score >= 7.5) return T('Very good program', 'Πολύ καλό πρόγραμμα');
   if (score >= 6) return T('Good, with room to improve', 'Καλό, με περιθώρια');
   if (score >= 4) return T('Fair: some areas are missing', 'Μέτριο: λείπουν περιοχές');
-  if (score > 0) return T('Not enough for muscle growth', 'Ελλιπές για μυϊκή ανάπτυξη');
+  if (score > 0) return goalType === 'cut' ? T('Not enough to keep your muscle while losing fat', 'Ελλιπές για να κρατήσεις τους μύες χάνοντας λίπος') : goalType === 'maintain' ? T('Not enough to keep your muscle', 'Ελλιπές για να κρατήσεις τους μύες σου') : T('Not enough for muscle growth', 'Ελλιπές για μυϊκή ανάπτυξη');
   return T('No exercises yet', 'Δεν υπάρχουν ακόμα ασκήσεις');
 }
 
@@ -138,11 +142,12 @@ export function analyze(programs, exById) {
   for (const p of active) {
     for (let k = 0; k < p.perWeek; k++) sessions.push({ program: p, sets: new Map(), total: 0 });
   }
-  // καρτέλες Σώμα/Στόχοι (addons/body.js): ο στόχος αλλάζει τα σετ που χρειάζεται κάθε μυς
+  // καρτέλα Στόχοι (addons/body.js): ο κύριος στόχος αλλάζει τα σετ και τις φορές την εβδομάδα που χρειάζεται κάθε μυς
   const bodyApi = typeof window !== 'undefined' ? window.__mxBody : null;
   const goal = bodyApi && bodyApi.goalType ? bodyApi.goalType() : null;
-  const gk = goal ? GOAL_SETS[goal.type] || 1 : 1;
-  const muscles = SCORED.map((m) => ({ ...m, min: Math.max(3, Math.round(minOf(m) * gk)), baseMin: minOf(m), V: 0, hits: 0, maxS: 0, contrib: [] }));
+  const gk = goal ? goal.sets : 1;
+  const fq = goal ? goal.freq : RULES.freqTarget;
+  const muscles = SCORED.map((m) => ({ ...m, min: Math.max(3, Math.round(minOf(m) * gk)), baseMin: minOf(m), freqTarget: fq, V: 0, hits: 0, maxS: 0, contrib: [] }));
   for (const s of sessions) {
     for (const it of s.program.items) {
       const ex = exById.get(it.ex);
@@ -166,7 +171,7 @@ export function analyze(programs, exById) {
   }
   // καρτέλα Πρόοδος (addons/progress.js): πόσο προχωράνε τα φορτία των ασκήσεων κάθε μυός
   const prog = typeof window !== 'undefined' ? window.__mxProg : null;
-  const growth = !goal || ['bulk', 'build', 'recomp'].includes(goal.type);
+  const growth = !goal || goal.growth;
   for (const m of muscles) {
     for (const s of sessions) {
       const v = s.sets.get(m.id) ?? 0;
@@ -177,9 +182,9 @@ export function analyze(programs, exById) {
     m.max = maxOf(m);
     m.cap = capOf(m);
     m.vol = volScore(m.V, m.min, m.max);
-    m.freq = freqScore(m.hits, m.V);
+    m.freq = freqScore(m.hits, m.V, fq);
     m.dist = distScore(m.maxS, m.cap);
-    m.base = muscleScore(m.V, m.hits, m.maxS, m.min, m.max, m.cap);
+    m.base = muscleScore(m.V, m.hits, m.maxS, m.min, m.max, m.cap, fq);
     m.contrib.sort((a, b) => b.weekly - a.weekly);
     // πρόοδος φορτίου του μυός: μέσος όρος των ασκήσεών του, με βάρος τα εβδομαδιαία σετ (χωρίς καταγραφή = 0)
     m.prog = null;
@@ -307,6 +312,10 @@ export function suggest(result, programs, exById) {
   const pick = (mid, n = 2) => (PREFERRED[mid] ?? []).filter((id) => exById.has(id) && !used.has(id)).slice(0, n);
   const has = (list) => list.some((id) => used.has(id));
   const V = (id) => result.byId[id].V;
+  // ο κύριος στόχος (addons/body.js): πόσες φορές την εβδομάδα θέλει κάθε μυς και τι λέμε στις προτάσεις
+  const goal = result.goal;
+  const gtype = goal ? goal.type : 'bulk';
+  const fq = goal ? goal.freq : RULES.freqTarget;
 
   if (!sessions) {
     out.push({ kind: 'start', title: T('Start with a program', 'Ξεκίνα από ένα πρόγραμμα'), text: T('Tick at least one program for your week, or add a ready-made template. A good start is Upper/Lower twice a week: it covers the whole body in 4 sessions.', 'Τσέκαρε τουλάχιστον ένα πρόγραμμα για την εβδομάδα ή πρόσθεσε ένα έτοιμο πρότυπο. Για αρχή, το Άνω/Κάτω σώμα 2 φορές την εβδομάδα καλύπτει όλο το σώμα σε 4 προπονήσεις.'), actions: [{ type: 'template', id: 'upper' }, { type: 'template', id: 'lower' }] });
@@ -323,10 +332,11 @@ export function suggest(result, programs, exById) {
     out.push({ kind: 'region', title: T('Almost the whole lower body is missing', 'Λείπει σχεδόν όλο το κάτω σώμα'), text: T('Quads, hamstrings, glutes and calves get very few sets. Add a leg session twice a week.', 'Τετρακέφαλοι, οπίσθιοι, γλουτοί και γάμπες έχουν ελάχιστα σετ. Πρόσθεσε μια προπόνηση ποδιών 2 φορές την εβδομάδα.'), actions: [{ type: 'template', id: 'lower' }] });
   }
 
-  // 1. Συχνότητα: όλο το πρόγραμμα 1 φορά την εβδομάδα
-  if (sessions === 1) {
+  // 1. Συχνότητα: όλο το πρόγραμμα 1 φορά την εβδομάδα (στη διατήρηση η 1 φορά αρκεί)
+  if (sessions === 1 && fq >= 2) {
     const p = programs.find((x) => x.active);
-    out.push({ kind: 'frequency', title: T('Everything in one session a week', 'Όλα σε μία προπόνηση την εβδομάδα'), text: T('Each muscle is trained only once. Running the same program twice a week doubles the sets and reaches a frequency of 2 sessions per muscle, which is optimal for growth.', 'Κάθε μυς δουλεύει μόνο 1 φορά. Με το ίδιο πρόγραμμα 2 φορές την εβδομάδα διπλασιάζεις τα σετ και πετυχαίνεις τη συχνότητα των 2 φορών, που είναι το βέλτιστο για ανάπτυξη.'), actions: p ? [{ type: 'perweek', program: p.id, n: 2 }] : [] });
+    out.push({ kind: 'frequency', title: T('Everything in one session a week', 'Όλα σε μία προπόνηση την εβδομάδα'), text: T('Each muscle is trained only once. Running the same program twice a week doubles the sets and reaches a frequency of 2 sessions per muscle, ', 'Κάθε μυς δουλεύει μόνο 1 φορά. Με το ίδιο πρόγραμμα 2 φορές την εβδομάδα διπλασιάζεις τα σετ και πετυχαίνεις τη συχνότητα των 2 φορών, ')
+      + (gtype === 'cut' ? T('which is what keeps your muscle while you lose fat.', 'που κρατά τους μύες σου όσο χάνεις λίπος.') : gtype === 'maintain' ? T('which is what your muscles need to hold.', 'που χρειάζονται οι μύες σου για να κρατηθούν.') : T('which is optimal for growth.', 'που είναι το βέλτιστο για ανάπτυξη.')), actions: p ? [{ type: 'perweek', program: p.id, n: 2 }] : [] });
   }
 
   // 2. Μύες κάτω από τον στόχο, με σειρά σημασίας
@@ -337,13 +347,13 @@ export function suggest(result, programs, exById) {
     const need = Math.ceil(m.min - m.V);
     const exs = pick(m.id, need >= 6 && m.w >= 2 ? 2 : 1);
     const each = Math.min(5, Math.max(2, Math.ceil(need / Math.max(1, exs.length))));
-    const split = need >= 4 ? T(' Spread them over 2 different days.', ' Μοίρασέ τα σε 2 διαφορετικές μέρες.') : '';
+    const split = need >= 4 && fq >= 2 ? T(' Spread them over 2 different days.', ' Μοίρασέ τα σε 2 διαφορετικές μέρες.') : '';
     out.push({
       kind: 'volume', muscle: m,
       title: T(`${m.name}: ${fmt(m.V)} of ${m.min} sets`, `${m.name}: ${fmt(m.V)} από ${m.min} σετ`),
       text: (m.V === 0
         ? T(`Not trained at all. Target: at least ${m.min} sets a week.`, `Δεν δουλεύει καθόλου. Στόχος: τουλάχιστον ${m.min} σετ την εβδομάδα.`)
-        : T(`About ${need} sets a week short of the ${m.min}-set target.`, `Λείπουν περίπου ${need} σετ την εβδομάδα για τον στόχο των ${m.min}.`)) + split,
+        : T(`About ${need} ${need === 1 ? 'set' : 'sets'} a week short of the ${m.min}-set target.`, `Λείπουν περίπου ${need} σετ την εβδομάδα για τον στόχο των ${m.min}.`)) + split,
       actions: exs.map((ex) => ({ type: 'add', ex, sets: each })),
     });
   }
@@ -364,8 +374,8 @@ export function suggest(result, programs, exById) {
   sel(V('calves') >= 3 && !has(MOVES.soleus), 'calves', T('Calves: the soleus is missing', 'Γάμπες: λείπει ο υποκνημίδιος'), T('Seated calf raises, with the knee bent, for the soleus, the largest calf muscle.', 'Ανυψώσεις καθιστός, με λυγισμένο γόνατο, για τον υποκνημίδιο, τον μεγαλύτερο μυ της γάμπας.'), MOVES.soleus);
   sel(V('calves') >= 3 && !has(MOVES.gastroc), 'calves', T('Calves: the gastrocnemius is missing', 'Γάμπες: λείπει ο γαστροκνήμιος'), T('Standing calf raises, with the knee straight, for the gastrocnemius.', 'Ανυψώσεις όρθιος, με τεντωμένο γόνατο, για τον γαστροκνήμιο.'), MOVES.gastroc);
 
-  // 4. Συχνότητα ανά μυ (όταν υπάρχουν ήδη 2+ προπονήσεις)
-  const once = result.muscles.filter((m) => m.V >= 4 && m.hits < 2 && m.w >= 2).sort((a, b) => b.w - a.w);
+  // 4. Συχνότητα ανά μυ (όταν υπάρχουν ήδη 2+ προπονήσεις και ο στόχος θέλει 2 φορές την εβδομάδα)
+  const once = fq >= 2 ? result.muscles.filter((m) => m.V >= 4 && m.hits < 2 && m.w >= 2).sort((a, b) => b.w - a.w) : [];
   if (once.length && sessions >= 2) {
     out.push({
       kind: 'frequency',
@@ -385,8 +395,8 @@ export function suggest(result, programs, exById) {
     out.push({
       kind: 'balance',
       title: T(`Balance: ${c.name}`, `Ισορροπία: ${c.name}`),
-      text: T(`More ${high} than ${low} (${fmt(Math.max(c.a, c.b))} vs ${fmt(Math.min(c.a, c.b))} sets). Bring up ${low} for even growth, good posture and healthy joints.`,
-        `Υπερέχει το «${high}» (${fmt(Math.max(c.a, c.b))} έναντι ${fmt(Math.min(c.a, c.b))} σετ). Ενίσχυσε το «${low}» για ομοιόμορφη ανάπτυξη, σωστή στάση σώματος και υγιείς αρθρώσεις.`),
+      text: T(`More ${high} than ${low} (${fmt(Math.max(c.a, c.b))} vs ${fmt(Math.min(c.a, c.b))} sets). Bring up ${low} for ${gtype === 'bulk' ? 'even growth' : 'a balanced body'}, good posture and healthy joints.`,
+        `Υπερέχει το «${high}» (${fmt(Math.max(c.a, c.b))} έναντι ${fmt(Math.min(c.a, c.b))} σετ). Ενίσχυσε το «${low}» για ${gtype === 'bulk' ? 'ομοιόμορφη ανάπτυξη' : 'ισορροπημένο σώμα'}, σωστή στάση σώματος και υγιείς αρθρώσεις.`),
       actions: addFor.map((mid) => pick(mid, 1)[0]).filter(Boolean).map((ex) => ({ type: 'add', ex, sets: 3 })),
     });
   }
@@ -419,6 +429,20 @@ export function suggest(result, programs, exById) {
         kind: 'session',
         title: T(`“${s.program.name}”: ${s.total} sets in one session`, `«${s.program.name}»: ${s.total} σετ σε μία προπόνηση`),
         text: T('More than 25–28 hard sets usually means a session of over 90 minutes, and quality drops toward the end. Split it into two sessions.', 'Πάνω από 25–28 σκληρά σετ η προπόνηση κρατά συνήθως πάνω από 90 λεπτά και η ποιότητα πέφτει στο τέλος. Χώρισέ την σε δύο προπονήσεις.'),
+        actions: [],
+      });
+    }
+  }
+  // 7β. Διατήρηση: πολύ περισσότερα σετ από όσα χρειάζονται (δεν ρίχνει τον βαθμό· απλώς μπορείς να κερδίσεις χρόνο)
+  if (gtype === 'maintain') {
+    const big = result.muscles.filter((m) => m.w >= 2 && m.V > 0);
+    const over = big.filter((m) => m.V >= 1.5 * m.min);
+    if (big.length && over.length >= big.length / 2) {
+      out.push({
+        kind: 'goal',
+        title: T('More training than maintenance needs', 'Περισσότερη προπόνηση από όση θέλει η διατήρηση'),
+        text: T(`${over.length} of your ${big.length} bigger muscles get at least one and a half times the sets that maintenance needs. You can keep the plan as it is, or save time: with a set less on each exercise you still keep your muscle, as long as the loads stay the same.`,
+          `${over.length} από τους ${big.length} μεγαλύτερους μύες σου παίρνουν τουλάχιστον μιάμιση φορά τα σετ που θέλει η διατήρηση. Μπορείς να κρατήσεις το πρόγραμμα όπως είναι ή να κερδίσεις χρόνο: με ένα σετ λιγότερο σε κάθε άσκηση κρατάς πάλι τους μύες σου, εφόσον τα φορτία μείνουν ίδια.`),
         actions: [],
       });
     }
@@ -461,7 +485,7 @@ export function suggest(result, programs, exById) {
     // λίγες προπονήσεις για τον στόχο → ίδιο πρόγραμμα περισσότερες φορές
     if (f && f.reasons[0][0] < 9 && sessions < 4 && !out.some((x) => x.kind === 'frequency' && x.actions.length)) {
       const p = programs.filter((x) => x.active).sort((a, b) => a.perWeek - b.perWeek)[0];
-      if (p) bt.unshift({ kind: 'body', title: T(`${window.__mxBody.TYPE[f.type][0]}: more workouts a week`, `${window.__mxBody.TYPE[f.type][0]}: περισσότερες προπονήσεις`), text: T(`For this goal ${f.type === 'cut' ? '3 or more' : '3–4'} workouts a week work best; you do ${sessions}.`, `Για αυτόν τον στόχο δουλεύουν καλύτερα ${f.type === 'cut' ? '3 ή περισσότερες' : '3–4'} προπονήσεις την εβδομάδα· κάνεις ${sessions}.`), actions: [{ type: 'perweek', program: p.id, n: p.perWeek + 1 }] });
+      if (p) bt.unshift({ kind: 'body', title: T(`${window.__mxBody.TYPE[f.type][0]}: more workouts a week`, `${window.__mxBody.TYPE[f.type][0]}: περισσότερες προπονήσεις`), text: T(`For this goal ${f.type === 'cut' ? '3 or more' : f.type === 'maintain' ? '2 or more' : '3–4'} workouts a week work best; you do ${sessions}.`, `Για αυτόν τον στόχο δουλεύουν καλύτερα ${f.type === 'cut' ? '3 ή περισσότερες' : f.type === 'maintain' ? '2 ή περισσότερες' : '3–4'} προπονήσεις την εβδομάδα· κάνεις ${sessions}.`), actions: [{ type: 'perweek', program: p.id, n: p.perWeek + 1 }] });
     }
     out.splice(Math.min(3, out.length), 0, ...bt);
   }
@@ -476,6 +500,13 @@ export function summaryText(result, programs, exById) {
     lines.push(T(`Program “${p.name}” ${p.perWeek}×/week: `, `Πρόγραμμα «${p.name}» ${p.perWeek}×/εβδ.: `) + items.map((it) => `${exById.get(it.ex).el} ${it.sets} ${T('sets', 'σετ')}`).join(', '));
   }
   lines.push('');
+  // ο κύριος στόχος του χρήστη: με αυτόν βγήκαν οι βαθμοί και με αυτόν πρέπει να κρίνει ο προπονητής
+  const goal = result.goal;
+  if (goal) {
+    const tgt = result.byId.chest;
+    lines.push(T(`Primary goal: ${goal.label}${goal.chosen ? ' (chosen by the user)' : ' (default, the user has not chosen yet)'}. Set target per big muscle: ${tgt.min}–${tgt.max} a week, ${goal.freq === 1 ? 'once' : 'twice'} a week; ${goal.hold ? 'the loads should be held' : 'the loads should go up over time'}.`,
+      `Κύριος στόχος: ${goal.label}${goal.chosen ? ' (επιλογή του χρήστη)' : ' (προεπιλογή, ο χρήστης δεν έχει διαλέξει ακόμα)'}. Στόχος σετ ανά μεγάλο μυ: ${tgt.min}–${tgt.max} την εβδομάδα, ${goal.freq === 1 ? '1 φορά' : '2 φορές'} την εβδομάδα· ${goal.hold ? 'τα φορτία πρέπει να κρατιούνται' : 'τα φορτία πρέπει να ανεβαίνουν με τον καιρό'}.`));
+  }
   lines.push(T(`Overall score ${fmt(result.overall)}/10 · volume ${fmt(result.sub.volume)} · frequency ${fmt(result.sub.frequency)} · balance ${fmt(result.sub.balance)}`,
     `Συνολικός βαθμός ${fmt(result.overall)}/10 · όγκος ${fmt(result.sub.volume)} · συχνότητα ${fmt(result.sub.frequency)} · ισορροπία ${fmt(result.sub.balance)}`));
   for (const m of result.muscles) {

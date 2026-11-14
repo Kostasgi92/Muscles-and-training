@@ -1,7 +1,7 @@
 /* Body data and goals for the program review.
    profile = {sex: 'm'|'f'|'', age, ageOn: "YYYY-MM-DD", height (cm)}
    entries = [{id, date: "YYYY-MM-DD", at, w (kg), fat (%), mus (% skeletal muscle), m: {neck, shoulders, chest, arm, forearm, waist, hips, thigh, calf} (cm)}]
-   goals   = {w, fat, mus, date, setOn}
+   goals   = {type: 'cut'|'bulk'|'maintain' (primary goal, chosen by the user; none = muscle gain), w, fat, mus, waist, date, setOn}
    Stored in this browser (localStorage "mx.body") and, when available, privately per user in the artifact db (doc "__body").
    window.__mxBody: computed metrics, a 0–10 "fit to goals" score for the review, suggestions, coach lines and the two tabs. */
 (() => {
@@ -35,6 +35,8 @@
     return { id: String(e.id || Math.random().toString(36).slice(2, 10)), date: e.date, at: +e.at || Date.now(), w: num(e.w), fat: num(e.fat), mus: num(e.mus), m };
   };
   const hasData = (e) => e.w || e.fat || e.mus || Object.keys(e.m).length;
+  // ο κύριος στόχος: απώλεια λίπους, μυϊκή ανάπτυξη ή διατήρηση
+  const GOAL_TYPES = ['cut', 'bulk', 'maintain'];
   const cleanAll = (d) => {
     d = d || {};
     const p = d.profile || {};
@@ -42,7 +44,7 @@
     return {
       profile: { sex: p.sex === 'm' || p.sex === 'f' ? p.sex : '', age: num(p.age), ageOn: isDate(p.ageOn) ? p.ageOn : null, height: num(p.height) },
       entries: (Array.isArray(d.entries) ? d.entries : []).filter((e) => e && isDate(e.date)).map(cleanEntry).filter(hasData),
-      goals: { w: num(g.w), fat: num(g.fat), mus: num(g.mus), waist: num(g.waist), date: isDate(g.date) ? g.date : null, setOn: isDate(g.setOn) ? g.setOn : null },
+      goals: { type: GOAL_TYPES.includes(g.type) ? g.type : null, w: num(g.w), fat: num(g.fat), mus: num(g.mus), waist: num(g.waist), date: isDate(g.date) ? g.date : null, setOn: isDate(g.setOn) ? g.setOn : null },
     };
   };
   let data = cleanAll(null);
@@ -72,7 +74,7 @@
             try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) { /* ignore */ }
             emit();
           }
-        } else if (data.entries.length || data.profile.height || data.goals.w) {
+        } else if (data.entries.length || data.profile.height || data.goals.w || data.goals.type) {
           doc.set(Object.assign({ createdAt: 0, updatedAt: Date.now() }, data)).catch(() => {});
         }
       }, () => {});
@@ -168,40 +170,62 @@
   }
 
   // ------------------------------------------------------------ goals
+  // Ο κύριος στόχος είναι επιλογή του χρήστη (καρτέλα Στόχοι): απώλεια λίπους, μυϊκή ανάπτυξη ή διατήρηση.
+  // Χωρίς επιλογή ισχύει η μυϊκή ανάπτυξη (ο σκοπός της εφαρμογής)· δεν συμπεραίνεται από τις μετρήσεις.
+  const TYPE = {
+    cut: [T('Fat loss', 'Απώλεια λίπους'), T('Lose fat while keeping your muscle.', 'Χάσε λίπος κρατώντας τους μύες σου.')],
+    bulk: [T('Muscle gain', 'Μυϊκή ανάπτυξη'), T('Build muscle.', 'Χτίσε μύες.')],
+    maintain: [T('Maintenance', 'Διατήρηση'), T('Keep the muscle and strength you have.', 'Κράτα τους μύες και τη δύναμη που έχεις.')],
+  };
+  // Τι σημαίνει ο στόχος για τους κανόνες της αξιολόγησης (review.js, progress.js):
+  //  sets: στόχος σετ ανά μυ ως ποσοστό του κανόνα των 10 · freq: φορές την εβδομάδα ανά μυ
+  //  hold: επιτυχία είναι να κρατάς τα φορτία (όχι να τα ανεβάζεις) · growth: οι περιφέρειες πρέπει να μεγαλώνουν
+  // Απώλεια λίπους: ίδια σετ με την ανάπτυξη (η μείωση του όγκου σε έλλειμμα κοστίζει μύες). Διατήρηση: ~⅓–⅔ του όγκου
+  // και 1 φορά την εβδομάδα αρκούν όσο κρατιούνται τα φορτία· από τα 60 χρειάζονται περισσότερα σετ και 2 φορές.
+  function rulesFor(type) {
+    const older = (age() || 0) >= 60;
+    return type === 'maintain' ? { sets: older ? 0.8 : 0.6, freq: older ? 2 : 1, hold: true, growth: false }
+      : type === 'cut' ? { sets: 1, freq: 2, hold: true, growth: false }
+        : { sets: 1, freq: 2, hold: false, growth: true };
+  }
+  function goalType() {
+    const type = data.goals.type || 'bulk';
+    return Object.assign({ type, chosen: !!data.goals.type, label: TYPE[type][0] }, rulesFor(type));
+  }
   function goalInfo(mt) {
     const g = data.goals;
     const w = mt.W ? mt.W.v : null;
-    const out = { set: !!(g.w || g.fat || g.mus || g.waist), g };
+    const out = { set: !!(g.w || g.fat || g.mus || g.waist), g, chosen: !!g.type, type: g.type || 'bulk' };
     const curWaist = mt.meas.waist ? mt.meas.waist.v : null;
-    // στόχος μέσης μικρότερος από τη σημερινή = λιγότερο κοιλιακό λίπος
-    const waistDown = !!(g.waist && curWaist && g.waist < curWaist - 1);
     out.dWaist = g.waist && curWaist ? g.waist - curWaist : null;
     if (g.w && g.fat) out.fatKg = (g.w * g.fat) / 100;
     if (g.w && g.mus) out.musKg = (g.w * g.mus) / 100;
-    let type = null;
-    if (out.set && w) {
-      const dW = g.w ? g.w - w : 0;
-      const dF = g.fat && mt.fat != null ? g.fat - mt.fat : 0;
-      const dMk = out.musKg && mt.musKg ? out.musKg - mt.musKg : 0;
-      if (dW <= -1.5 || (dF <= -2 && dW <= 0.5)) type = Math.abs(dW) <= 1.5 && dMk > 0.5 ? 'recomp' : 'cut';
-      else if (dW >= 1.5) type = 'bulk';
-      else if (dF <= -1 || dMk >= 0.5 || waistDown) type = 'recomp';
-      else type = 'maintain';
-    } else if (out.set) type = g.w ? null : (g.waist && !g.fat && !g.mus ? 'cut' : 'recomp');
-    // χωρίς στόχους: τι θα πρότεινε ένας προπονητής από τα δεδομένα (ο στόχος της εφαρμογής είναι η μυϊκή ανάπτυξη)
-    if (!type) {
-      if (mt.fat != null && mt.fatCat && (mt.fatCat[0] === 'warn' || mt.fatCat[0] === 'high')) type = 'cut';
-      else if (mt.whtrCat && mt.whtrCat[0] !== 'ok') type = 'cut';
-      else if (mt.bmiCat && mt.bmiCat[0] === 'under') type = 'bulk';
-      else if (mt.W) type = 'build';
-      out.inferred = !!type;
-    }
-    out.type = type;
     out.dW = g.w && w ? g.w - w : null;
     out.dF = g.fat && mt.fat != null ? g.fat - mt.fat : null;
     out.dFkg = out.fatKg != null && mt.fatKg != null ? out.fatKg - mt.fatKg : null;
     out.dM = g.mus && mt.M ? g.mus - mt.M.v : null;
     out.dMkg = out.musKg != null && mt.musKg != null ? out.musKg - mt.musKg : null;
+    // Μυϊκή ανάπτυξη: με μικρό πλεόνασμα θερμίδων ('surplus'), με σταθερό βάρος ('steady') ή χάνοντας ταυτόχρονα
+    // λίπος ('lean'). Το ορίζει το βάρος-στόχος· χωρίς αυτό, το λίπος (στόχος λίπους/μέσης κάτω από το σημερινό ή
+    // λίπος πάνω από το υγιές εύρος).
+    if (out.type === 'bulk') {
+      const fatHigh = !!(mt.fatCat && (mt.fatCat[0] === 'warn' || mt.fatCat[0] === 'high'));
+      const leaner = (out.dF != null && out.dF <= -1) || (out.dWaist != null && out.dWaist <= -1);
+      out.mode = out.dW != null ? (out.dW < -1 ? 'lean' : out.dW > 1 ? 'surplus' : 'steady') : leaner || fatHigh ? 'lean' : 'surplus';
+      out.modeWhy = out.mode === 'lean'
+        ? (out.dW != null ? T('Your target weight is below your current weight', 'Το βάρος-στόχος σου είναι κάτω από το σημερινό')
+          : leaner ? T('Your fat or waist target is below where you are now', 'Ο στόχος λίπους ή μέσης είναι κάτω από το σημερινό')
+            : T('Your body fat is above the healthy range', 'Το λίπος σου είναι πάνω από το υγιές εύρος'))
+          + T(', so the plan is to build muscle while slowly losing fat: eat around maintenance or a little below, with plenty of protein.', ', οπότε το πλάνο είναι να χτίζεις μύες χάνοντας σιγά σιγά λίπος: τρώγε γύρω στη συντήρηση ή λίγο πιο κάτω, με αρκετή πρωτεΐνη.')
+        : out.mode === 'steady'
+          ? T('Your target weight is about your current weight, so the plan is to build muscle at a stable weight: eat around maintenance.', 'Το βάρος-στόχος είναι περίπου το σημερινό σου, οπότε το πλάνο είναι να χτίζεις μύες με σταθερό βάρος: τρώγε γύρω στη συντήρηση.')
+          : T('The plan is to gain weight slowly, mostly as muscle: eat a little above maintenance.', 'Το πλάνο είναι να παίρνεις βάρος σιγά σιγά, κυρίως μύες: τρώγε λίγο πάνω από τη συντήρηση.');
+    }
+    // αριθμητικοί στόχοι που τραβούν αντίθετα από τον κύριο στόχο
+    if (out.type === 'cut' && out.dW != null && out.dW > 1) out.clash = T('Your target weight is above your current weight. With fat loss as the goal, the review expects your weight to go down.', 'Το βάρος-στόχος είναι πάνω από το σημερινό σου. Με στόχο την απώλεια λίπους, η αξιολόγηση περιμένει το βάρος να κατεβαίνει.');
+    if (out.type === 'maintain' && out.dW != null && Math.abs(out.dW) > 2) out.clash = T('Your target weight is not your current weight. With maintenance as the goal, the review expects a stable weight; choose fat loss or muscle gain to change it.', 'Το βάρος-στόχος δεν είναι το σημερινό σου. Με στόχο τη διατήρηση, η αξιολόγηση περιμένει σταθερό βάρος· διάλεξε απώλεια λίπους ή μυϊκή ανάπτυξη για να το αλλάξεις.');
+    // ο βαθμός «Στόχοι» μετράει όταν ο χρήστης έχει ασχοληθεί: επιλογή στόχου, αριθμητικοί στόχοι ή μετρήσεις
+    out.engaged = out.chosen || out.set || data.entries.length > 0;
     if (g.date && out.dW != null) {
       const wk = days(today(), g.date) / 7;
       out.weeksLeft = wk;
@@ -209,30 +233,40 @@
     }
     return out;
   }
-  const TYPE = {
-    cut: [T('Fat loss', 'Απώλεια λίπους'), T('Lose fat while keeping your muscle.', 'Χάσε λίπος κρατώντας τους μύες σου.')],
-    bulk: [T('Muscle gain (bulk)', 'Μυϊκή ανάπτυξη (όγκος)'), T('Gain weight slowly, mostly as muscle.', 'Πάρε βάρος σιγά, κυρίως μύες.')],
-    recomp: [T('Recomposition', 'Ανασύνθεση σώματος'), T('Same weight, less fat and more muscle.', 'Ίδιο βάρος, λιγότερο λίπος και περισσότεροι μύες.')],
-    maintain: [T('Maintenance', 'Διατήρηση'), T('Keep your current shape and strength.', 'Κράτα τη σημερινή σου φόρμα και δύναμη.')],
-    build: [T('Muscle growth', 'Μυϊκή ανάπτυξη'), T('Build muscle at a stable weight or a slow gain.', 'Χτίσε μύες με σταθερό βάρος ή αργή αύξηση.')],
-  };
 
   // ------------------------------------------------------------ fit of the training plan to body & goals (0–10)
-  // ctx (από review.js): {sessions, volume, overload, maxSession, groups: [{id, score}], muscles: {id: {V, min, name}}}
+  // ctx (από review.js): {sessions, volume, overload, maxSession, groups: [{id, score}]}
+  // Ο όγκος και η πρόοδος φορτίου έρχονται ήδη μετρημένα με τους κανόνες του στόχου (review.js, progress.js).
   function fit(ctx) {
     const mt = metrics(ctx.sessions);
     const gi = goalInfo(mt);
-    if (!gi.type || !ctx.sessions) return null;
-    const t = gi.type;
+    if (!gi.engaged || !ctx.sessions) return null;
+    const t = gi.type, gt = goalType();
     const S = ctx.sessions;
     const reasons = [];
-    const sess = t === 'maintain' ? (S >= 2 ? 10 : 6) : t === 'cut' ? (S >= 3 ? 10 : S === 2 ? 6.5 : 3.5) : (S >= 4 ? 10 : S === 3 ? 9 : S === 2 ? 6.5 : 3.5);
-    reasons.push([sess, T(`${S} ${S === 1 ? 'workout' : 'workouts'} a week`, `${S} ${S === 1 ? 'προπόνηση' : 'προπονήσεις'} την εβδομάδα`), sess >= 9 ? T('enough for this goal', 'αρκετές για τον στόχο') : T(t === 'cut' ? 'aim for at least 3 to keep muscle and burn more' : 'aim for 3–4 to grow', t === 'cut' ? 'στόχευσε τουλάχιστον 3, για να κρατήσεις μύες και να καις περισσότερο' : 'στόχευσε 3–4 για ανάπτυξη')]);
-    // ο όγκος ήδη μετριέται με τον στόχο σετ του στόχου σου (review.js GOAL_SETS)
+    let sess, sessWhy;
+    if (t === 'maintain') {
+      sess = S >= 2 ? 10 : gt.freq === 1 ? 8 : 5;
+      sessWhy = S >= 2 ? T('enough to keep what you have', 'αρκετές για να κρατήσεις ό,τι έχεις')
+        : gt.freq === 1 ? T('one can hold your muscle if the loads stay the same; a second one makes it safer', 'μία μπορεί να κρατήσει τους μύες αν τα φορτία μείνουν ίδια· μια δεύτερη το κάνει πιο σίγουρο')
+          : T('after 60, muscle needs 2 workouts a week to hold', 'μετά τα 60 οι μύες θέλουν 2 προπονήσεις την εβδομάδα για να κρατηθούν');
+    } else if (t === 'cut') {
+      sess = S >= 3 ? 10 : S === 2 ? 6.5 : 3.5;
+      sessWhy = sess >= 9 ? T('enough for this goal', 'αρκετές για τον στόχο') : T('aim for at least 3 to keep muscle and burn more', 'στόχευσε τουλάχιστον 3, για να κρατήσεις μύες και να καις περισσότερο');
+    } else {
+      sess = S >= 4 ? 10 : S === 3 ? 9 : S === 2 ? 6.5 : 3.5;
+      sessWhy = sess >= 9 ? T('enough for this goal', 'αρκετές για τον στόχο') : T('aim for 3–4 to grow', 'στόχευσε 3–4 για ανάπτυξη');
+    }
+    reasons.push([sess, T(`${S} ${S === 1 ? 'workout' : 'workouts'} a week`, `${S} ${S === 1 ? 'προπόνηση' : 'προπονήσεις'} την εβδομάδα`), sessWhy]);
     const vol = ctx.volume;
-    reasons.push([vol, T('Weekly volume', 'Εβδομαδιαίος όγκος'), t === 'cut' ? T('during fat loss about 7 hard sets per big muscle keep it', 'στην απώλεια λίπους ~7 σκληρά σετ ανά μεγάλο μυ αρκούν για να τον κρατήσεις') : t === 'maintain' ? T('about 6 hard sets per big muscle keep your shape', '~6 σκληρά σετ ανά μεγάλο μυ κρατούν τη φόρμα σου') : T('growth needs ~10+ hard sets per muscle', 'η ανάπτυξη θέλει ~10+ σκληρά σετ ανά μυ')]);
+    const nSets = Math.round(10 * gt.sets);
+    reasons.push([vol, T('Weekly volume', 'Εβδομαδιαίος όγκος'), t === 'cut' ? T('keep the 10+ hard sets per muscle of a growth plan: cutting sets in a deficit costs muscle', 'κράτα τα 10+ σκληρά σετ ανά μυ ενός προγράμματος ανάπτυξης: η μείωση των σετ στο έλλειμμα κοστίζει μύες')
+      : t === 'maintain' ? T(`about ${nSets} hard sets per big muscle are enough to keep it`, `περίπου ${nSets} σκληρά σετ ανά μεγάλο μυ αρκούν για να τον κρατήσεις`)
+        : T('growth needs 10+ hard sets per muscle', 'η ανάπτυξη θέλει 10+ σκληρά σετ ανά μυ')]);
     const ov = ctx.overload == null ? 5 : ctx.overload;
-    reasons.push([ov, T('Progressive overload', 'Πρόοδος φορτίου'), t === 'cut' ? T('keeping your loads protects muscle in a deficit', 'η διατήρηση των φορτίων προστατεύει τους μύες στο έλλειμμα') : T('more load over time is what drives growth', 'η αύξηση φορτίου με τον καιρό φέρνει την ανάπτυξη')]);
+    reasons.push([ov, gt.hold ? T('Loads held', 'Διατήρηση φορτίων') : T('Progressive overload', 'Πρόοδος φορτίου'), t === 'cut' ? T('holding your loads is what protects muscle in a deficit', 'η διατήρηση των φορτίων προστατεύει τους μύες στο έλλειμμα')
+      : t === 'maintain' ? T('holding your loads is what keeps muscle on less training', 'η διατήρηση των φορτίων κρατά τους μύες με λιγότερη προπόνηση')
+        : T('more load over time is what drives growth', 'η αύξηση φορτίου με τον καιρό φέρνει την ανάπτυξη')]);
     let align;
     if (t === 'cut') {
       const legs = (ctx.groups || []).filter((g) => g.id === 'legs' || g.id === 'hips' || g.id === 'back');
@@ -242,27 +276,29 @@
     } else align = 0.35 * sess + 0.4 * vol + 0.25 * ov;
     let ageAdj = 0;
     if (mt.age >= 45 && ctx.maxSession > 25) { ageAdj = -0.8; reasons.push([5, T(`Long sessions at ${mt.age}`, `Μεγάλες προπονήσεις στα ${mt.age}`), T('over 25 hard sets in one session makes recovery harder', 'πάνω από 25 σκληρά σετ σε μία προπόνηση δυσκολεύουν την αποκατάσταση')]); }
-    // πορεία προς τον στόχο (από τις μετρήσεις)
+    // πορεία του βάρους σε σχέση με τον στόχο (από τις μετρήσεις)
     let trend = null;
-    const rw = rate('w'), rf = rate('fat'), rm = rate('mus');
+    const rw = rate('w'), rf = rate('fat');
     const w = mt.W ? mt.W.v : null;
     if (rw && w) {
       const pct = (100 * rw.perWeek) / w;
-      const fatDown = rf && rf.perWeek < -0.05, musUp = rm && rm.perWeek > 0.03, fatUp = rf && rf.perWeek > 0.12;
+      const fatUp = rf && rf.perWeek > 0.12;
       if (t === 'cut') trend = pct <= -0.5 && pct >= -1 ? 10 : (pct < -0.25 && pct > -0.5) || (pct < -1 && pct >= -1.5) ? 7.5 : pct < -1.5 ? 5 : pct <= 0 ? 5 : 2;
-      else if (t === 'bulk') trend = pct >= 0.1 && pct <= 0.5 ? (fatUp ? 7.5 : 10) : pct > 0.5 && pct <= 0.8 ? 6.5 : pct > 0.8 ? 4 : pct > -0.1 ? 6 : 2;
-      else if (t === 'recomp' || t === 'build') trend = Math.abs(pct) <= 0.3 ? (fatDown || musUp ? 10 : fatUp ? 5 : 7.5) : pct > 0.3 && pct <= 0.6 ? (fatUp ? 5 : 7.5) : pct < -0.3 ? (t === 'build' ? 5 : 6.5) : 4;
-      else trend = Math.abs(pct) <= 0.25 ? 10 : 6;
-      reasons.push([trend, T(`Weight ${sgn(pct, 2)}% a week`, `Βάρος ${sgn(pct, 2)}% την εβδομάδα`), trendText(t, pct)]);
+      else if (t === 'maintain') trend = Math.abs(pct) <= 0.25 ? 10 : 6;
+      else if (gi.mode === 'lean') trend = pct <= 0.1 && pct >= -0.5 ? 10 : pct < -0.5 && pct >= -0.75 ? 7.5 : pct < -0.75 ? 5 : pct <= 0.4 ? 6 : 4;
+      else if (gi.mode === 'steady') trend = Math.abs(pct) <= 0.25 ? (fatUp ? 7.5 : 10) : Math.abs(pct) <= 0.5 ? 7.5 : 5;
+      else trend = pct >= 0.1 && pct <= 0.5 ? (fatUp ? 7.5 : 10) : pct > 0.5 && pct <= 0.8 ? 6.5 : pct > 0.8 ? 4 : pct > -0.1 ? 6 : 2;
+      reasons.push([trend, T(`Weight ${sgn(pct, 2)}% a week`, `Βάρος ${sgn(pct, 2)}% την εβδομάδα`), trendText(t, pct, gi.mode)]);
     }
     const score = clamp((trend == null ? align : 0.65 * align + 0.35 * trend) + ageAdj, 0, 10);
-    return { score, type: t, inferred: gi.inferred, reasons, mt, gi };
+    return { score, type: t, chosen: gi.chosen, mode: gi.mode || null, reasons, mt, gi };
   }
-  function trendText(t, pct) {
+  function trendText(t, pct, mode) {
     if (t === 'cut') return pct > 0 ? T('moving away from the goal: check calories', 'απομακρύνεσαι από τον στόχο: έλεγξε τις θερμίδες') : pct < -1 ? T('faster than 1% a week risks muscle loss', 'πιο γρήγορα από 1% την εβδομάδα κινδυνεύεις να χάσεις μύες') : pct > -0.5 ? T('slower than the ideal 0.5–1% a week', 'πιο αργά από το ιδανικό 0,5–1% την εβδομάδα') : T('ideal pace (0.5–1% a week)', 'ιδανικός ρυθμός (0,5–1% την εβδομάδα)');
-    if (t === 'bulk') return pct < 0 ? T('losing weight while trying to gain', 'χάνεις βάρος ενώ θέλεις να πάρεις') : pct > 0.5 ? T('above 0.5% a week much of the gain is fat', 'πάνω από 0,5% την εβδομάδα μεγάλο μέρος είναι λίπος') : pct < 0.1 ? T('too slow to support growth', 'πολύ αργά για να στηρίξει ανάπτυξη') : T('ideal pace (0.1–0.5% a week)', 'ιδανικός ρυθμός (0,1–0,5% την εβδομάδα)');
     if (t === 'maintain') return Math.abs(pct) <= 0.25 ? T('stable, as intended', 'σταθερό, όπως θέλεις') : T('drifting from your weight', 'απομακρύνεσαι από το βάρος σου');
-    return Math.abs(pct) <= 0.3 ? T('stable weight, right for recomposition', 'σταθερό βάρος, σωστό για ανασύνθεση') : pct > 0 ? T('gaining: watch the fat percentage', 'ανεβαίνεις: πρόσεχε το ποσοστό λίπους') : T('losing weight: eat a bit more to build muscle', 'χάνεις βάρος: φάε λίγο περισσότερο για να χτίσεις μύες');
+    if (mode === 'lean') return pct > 0.1 ? T('gaining weight while your target is lower: eat a little less', 'ανεβαίνεις ενώ ο στόχος σου είναι χαμηλότερα: φάε λίγο λιγότερο') : pct < -0.75 ? T('losing this fast leaves too little to build muscle: eat a little more', 'τόσο γρήγορη απώλεια δεν αφήνει περιθώριο για μύες: φάε λίγο περισσότερο') : pct < -0.5 ? T('a little fast for building muscle: keep it to 0.5% a week or less', 'λίγο γρήγορα για να χτίζεις μύες: κράτα το έως 0,5% την εβδομάδα') : T('right pace for building muscle while losing fat (0 to −0.5% a week)', 'σωστός ρυθμός για μύες με ταυτόχρονη απώλεια λίπους (0 έως −0,5% την εβδομάδα)');
+    if (mode === 'steady') return Math.abs(pct) <= 0.25 ? T('stable weight, right for building muscle at this weight', 'σταθερό βάρος, σωστό για να χτίζεις μύες σε αυτά τα κιλά') : pct > 0 ? T('gaining: watch the fat percentage', 'ανεβαίνεις: πρόσεχε το ποσοστό λίπους') : T('losing weight: eat a bit more to build muscle', 'χάνεις βάρος: φάε λίγο περισσότερο για να χτίσεις μύες');
+    return pct < 0 ? T('losing weight while trying to gain', 'χάνεις βάρος ενώ θέλεις να πάρεις') : pct > 0.5 ? T('above 0.5% a week much of the gain is fat', 'πάνω από 0,5% την εβδομάδα μεγάλο μέρος είναι λίπος') : pct < 0.1 ? T('too slow to support growth', 'πολύ αργά για να στηρίξει ανάπτυξη') : T('ideal pace (0.1–0.5% a week)', 'ιδανικός ρυθμός (0,1–0,5% την εβδομάδα)');
   }
 
   // περιφέρειες που δεν μεγαλώνουν (≥ 6 εβδομάδες) ενώ ο στόχος είναι ανάπτυξη
@@ -282,25 +318,38 @@
   function tips(ctx, f) {
     const out = [];
     const mt = f ? f.mt : metrics(ctx.sessions);
+    const gi = f ? f.gi : goalInfo(mt);
+    if (!gi.chosen) out.push({ kind: 'body', title: T('Choose your goal', 'Διάλεξε τον στόχο σου'), text: T('The review now assumes muscle gain. If you want fat loss or maintenance instead, choose it in the Goals tab: the set targets, the progression and the advice change with it.', 'Η αξιολόγηση θεωρεί τώρα ότι θέλεις μυϊκή ανάπτυξη. Αν θέλεις απώλεια λίπους ή διατήρηση, διάλεξέ το στην καρτέλα Στόχοι: αλλάζουν οι στόχοι σετ, η πρόοδος φορτίου και οι συμβουλές.'), actions: [{ type: 'tab', id: 'goals' }] });
     if (!data.entries.length || !data.profile.height) {
       out.push({ kind: 'body', title: T('Add your body data', 'Πρόσθεσε τα στοιχεία σώματος'), text: T('With your age, height, weight and body-fat and muscle percentages, the review also judges whether the plan fits your body and goals.', 'Με την ηλικία, το ύψος, το βάρος και τα ποσοστά λίπους και μυών, η αξιολόγηση κρίνει και αν το πρόγραμμα ταιριάζει στο σώμα και στους στόχους σου.'), actions: [{ type: 'tab', id: 'body' }] });
       return out;
     }
-    if (!(data.goals.w || data.goals.fat || data.goals.mus || data.goals.waist)) out.push({ kind: 'body', title: T('Set your goals', 'Όρισε τους στόχους σου'), text: T('Add your target weight and body-fat and muscle percentages. The score then checks the plan against your real goal instead of a general one.', 'Πρόσθεσε το βάρος και τα ποσοστά λίπους και μυών που θέλεις. Ο βαθμός τότε ελέγχει το πρόγραμμα με βάση τον δικό σου στόχο, όχι έναν γενικό.'), actions: [{ type: 'tab', id: 'goals' }] });
     if (!f) return out;
-    const t = f.type, kcal = mt.tdee;
+    const t = f.type, mode = gi.mode, kcal = mt.tdee;
     const w = mt.W ? mt.W.v : null;
-    if (t === 'cut' && w) out.push({ kind: 'body', title: T('Fat loss: how to eat and move', 'Απώλεια λίπους: διατροφή και κίνηση'), text: (kcal ? T(`About ${Math.round((kcal - 450) / 50) * 50} kcal a day (≈450 below your estimated ${Math.round(kcal / 50) * 50} kcal maintenance). `, `Περίπου ${Math.round((kcal - 450) / 50) * 50} kcal την ημέρα (≈450 κάτω από τις ~${Math.round(kcal / 50) * 50} kcal συντήρησης). `) : '') + T(`Protein ${Math.round(w * 2)}–${Math.round(w * 2.4)} g a day, keep lifting heavy, 8,000–10,000 steps and 1–3 short cardio sessions a week.`, `Πρωτεΐνη ${Math.round(w * 2)}–${Math.round(w * 2.4)} g την ημέρα, συνέχισε τα βαριά σετ, 8.000–10.000 βήματα και 1–3 σύντομες αερόβιες προπονήσεις την εβδομάδα.`), actions: [] });
-    if ((t === 'bulk' || t === 'build' || t === 'recomp') && w) out.push({ kind: 'body', title: t === 'bulk' ? T('Muscle gain: how to eat', 'Μυϊκή ανάπτυξη: διατροφή') : t === 'recomp' ? T('Recomposition: how to eat', 'Ανασύνθεση: διατροφή') : T('Growth: how to eat', 'Ανάπτυξη: διατροφή'), text: (kcal ? (t === 'bulk' ? T(`About ${Math.round((kcal + 250) / 50) * 50} kcal a day (≈250 above maintenance). `, `Περίπου ${Math.round((kcal + 250) / 50) * 50} kcal την ημέρα (≈250 πάνω από τη συντήρηση). `) : T(`About ${Math.round(kcal / 50) * 50} kcal a day (maintenance). `, `Περίπου ${Math.round(kcal / 50) * 50} kcal την ημέρα (συντήρηση). `)) : '') + T(`Protein ${Math.round(w * 1.6)}–${Math.round(w * 2.2)} g a day and 7–9 hours of sleep.`, `Πρωτεΐνη ${Math.round(w * 1.6)}–${Math.round(w * 2.2)} g την ημέρα και 7–9 ώρες ύπνος.`), actions: [] });
+    const r50 = (x) => Math.round(x / 50) * 50;
+    const prot = (a, b) => T(`Protein ${Math.round(w * a)}–${Math.round(w * b)} g a day`, `Πρωτεΐνη ${Math.round(w * a)}–${Math.round(w * b)} g την ημέρα`);
+    const sleep = T(' and 7–9 hours of sleep.', ' και 7–9 ώρες ύπνος.');
+    if (t === 'cut' && w) out.push({ kind: 'body', title: T('Fat loss: how to eat and move', 'Απώλεια λίπους: διατροφή και κίνηση'), text: (kcal ? T(`About ${r50(kcal - 450)} kcal a day (≈450 below your estimated ${r50(kcal)} kcal maintenance). `, `Περίπου ${r50(kcal - 450)} kcal την ημέρα (≈450 κάτω από τις ~${r50(kcal)} kcal συντήρησης). `) : '') + prot(2, 2.4) + T(', keep lifting heavy, 8,000–10,000 steps and 1–3 short cardio sessions a week.', ', συνέχισε τα βαριά σετ, 8.000–10.000 βήματα και 1–3 σύντομες αερόβιες προπονήσεις την εβδομάδα.'), actions: [] });
+    if (t === 'maintain' && w) out.push({ kind: 'body', title: T('Maintenance: how to eat', 'Διατήρηση: διατροφή'), text: (kcal ? T(`About ${r50(kcal)} kcal a day (your estimated maintenance). `, `Περίπου ${r50(kcal)} kcal την ημέρα (η εκτιμώμενη συντήρησή σου). `) : '') + prot(1.4, 2) + sleep, actions: [] });
+    if (t === 'bulk' && w) {
+      if (mode === 'lean') out.push({ kind: 'body', title: T('Muscle gain while losing fat: how to eat', 'Μυϊκή ανάπτυξη με απώλεια λίπους: διατροφή'), text: (kcal ? T(`About ${r50(kcal - 250)}–${r50(kcal)} kcal a day (your estimated maintenance or up to ≈250 below). `, `Περίπου ${r50(kcal - 250)}–${r50(kcal)} kcal την ημέρα (η εκτιμώμενη συντήρησή σου ή έως ≈250 κάτω). `) : '') + T(`A bigger deficit slows muscle growth: lose at most ${nf(w * 0.005)} kg a week. `, `Μεγαλύτερο έλλειμμα φρενάρει την ανάπτυξη: χάνε το πολύ ${nf(w * 0.005)} kg την εβδομάδα. `) + prot(2, 2.4) + sleep, actions: [] });
+      else if (mode === 'steady') out.push({ kind: 'body', title: T('Muscle gain: how to eat', 'Μυϊκή ανάπτυξη: διατροφή'), text: (kcal ? T(`About ${r50(kcal)} kcal a day (your estimated maintenance). `, `Περίπου ${r50(kcal)} kcal την ημέρα (η εκτιμώμενη συντήρησή σου). `) : '') + prot(1.6, 2.2) + sleep, actions: [] });
+      else out.push({ kind: 'body', title: T('Muscle gain: how to eat', 'Μυϊκή ανάπτυξη: διατροφή'), text: (kcal ? T(`About ${r50(kcal + 250)} kcal a day (≈250 above your estimated ${r50(kcal)} kcal maintenance). `, `Περίπου ${r50(kcal + 250)} kcal την ημέρα (≈250 πάνω από τις ~${r50(kcal)} kcal συντήρησης). `) : '') + T(`Aim to gain ${nf(w * 0.0025, 2)}–${nf(w * 0.005, 2)} kg a week: faster than that is mostly fat. `, `Στόχευσε σε +${nf(w * 0.0025, 2)}–${nf(w * 0.005, 2)} kg την εβδομάδα: πιο γρήγορα είναι κυρίως λίπος. `) + prot(1.6, 2.2) + sleep, actions: [] });
+    }
     const rw = rate('w');
     if (rw && w) {
       const pct = (100 * rw.perWeek) / w;
-      const off = (t === 'cut' && (pct > -0.25 || pct < -1.2)) || (t === 'bulk' && (pct < 0.05 || pct > 0.6)) || ((t === 'recomp' || t === 'maintain') && Math.abs(pct) > 0.4);
-      if (off) out.push({ kind: 'body', title: T(`Weight ${sgn(rw.perWeek, 2)} kg a week`, `Βάρος ${sgn(rw.perWeek, 2)} kg την εβδομάδα`), text: trendText(t, pct).replace(/^./, (c) => c.toUpperCase()) + '.', actions: [] });
+      const off = t === 'cut' ? (pct > -0.25 || pct < -1.2) : t === 'maintain' ? Math.abs(pct) > 0.4 : mode === 'lean' ? (pct > 0.15 || pct < -0.75) : mode === 'steady' ? Math.abs(pct) > 0.4 : (pct < 0.05 || pct > 0.6);
+      if (off) out.push({ kind: 'body', title: T(`Weight ${sgn(rw.perWeek, 2)} kg a week`, `Βάρος ${sgn(rw.perWeek, 2)} kg την εβδομάδα`), text: trendText(t, pct, mode).replace(/^./, (c) => c.toUpperCase()) + '.', actions: [] });
     }
-    if (mt.whtrCat && mt.whtrCat[0] !== 'ok') out.push({ kind: 'body', title: T(`Waist-to-height ${nf(mt.whtr, 2)}`, `Μέση προς ύψος ${nf(mt.whtr, 2)}`), text: T('Above 0.5 means more belly fat and a higher health risk. Reducing it comes before the look: a mild calorie deficit and more daily movement.', 'Πάνω από 0,5 σημαίνει περισσότερο κοιλιακό λίπος και αυξημένο κίνδυνο για την υγεία. Η μείωσή του προηγείται της εμφάνισης: μικρό θερμιδικό έλλειμμα και περισσότερη καθημερινή κίνηση.'), actions: [] });
+    if (mt.whtrCat && mt.whtrCat[0] !== 'ok') out.push({ kind: 'body', title: T(`Waist-to-height ${nf(mt.whtr, 2)}`, `Μέση προς ύψος ${nf(mt.whtr, 2)}`), text: T('Above 0.5 means more belly fat and a higher health risk. ', 'Πάνω από 0,5 σημαίνει περισσότερο κοιλιακό λίπος και αυξημένο κίνδυνο για την υγεία. ')
+      + (t === 'cut' ? T('Your goal already brings it down: stay in your calorie deficit and move more every day.', 'Ο στόχος σου ήδη το κατεβάζει: μείνε στο θερμιδικό σου έλλειμμα και κινήσου περισσότερο κάθε μέρα.')
+        : mode === 'lean' ? T('Your plan already brings it down: keep the calorie deficit mild and move more every day.', 'Το πλάνο σου ήδη το κατεβάζει: κράτα μικρό το θερμιδικό έλλειμμα και κινήσου περισσότερο κάθε μέρα.')
+        : mode === 'surplus' ? T('Gaining weight will push it up: consider building muscle at a stable weight, or losing some fat first.', 'Αν πάρεις βάρος θα ανέβει: σκέψου να χτίσεις μύες με σταθερό βάρος ή να χάσεις πρώτα λίγο λίπος.')
+          : T('A mild calorie deficit and more daily movement bring it down.', 'Ένα μικρό θερμιδικό έλλειμμα και περισσότερη καθημερινή κίνηση το κατεβάζουν.')), actions: [] });
     if (mt.age >= 40) out.push({ kind: 'body', title: T(`At ${mt.age}: recovery and joints`, `Στα ${mt.age}: αποκατάσταση και αρθρώσεις`), text: T('Warm up 5–10 minutes with lighter sets, leave ~48 hours before training the same muscle hard again, and keep loading the legs: leg strength protects bones and balance with age.', 'Ζέσταμα 5–10 λεπτά με ελαφρύτερα σετ, ~48 ώρες πριν δουλέψεις ξανά έντονα τον ίδιο μυ και συνέχισε να φορτώνεις τα πόδια: η δύναμη των ποδιών προστατεύει τα οστά και την ισορροπία με τα χρόνια.'), actions: [] });
-    if (t === 'bulk' || t === 'build' || t === 'recomp') stagnant().forEach((s) => out.push({ kind: 'body', stag: s, title: T(`${s.name}: no growth in ${Math.round(days(s.from.date, s.to.date) / 7)} weeks`, `${s.name}: χωρίς αύξηση εδώ και ${Math.round(days(s.from.date, s.to.date) / 7)} εβδομάδες`), text: T(`${nf(s.from.v)} → ${nf(s.to.v)} cm.`, `${nf(s.from.v)} → ${nf(s.to.v)} cm.`), actions: [] }));
+    if (t === 'bulk') stagnant().forEach((s) => out.push({ kind: 'body', stag: s, title: T(`${s.name}: no growth in ${Math.round(days(s.from.date, s.to.date) / 7)} weeks`, `${s.name}: χωρίς αύξηση εδώ και ${Math.round(days(s.from.date, s.to.date) / 7)} εβδομάδες`), text: T(`${nf(s.from.v)} → ${nf(s.to.v)} cm.`, `${nf(s.from.v)} → ${nf(s.to.v)} cm.`), actions: [] }));
     return out;
   }
 
@@ -315,13 +364,15 @@
     if (ms.length) l.push(T('Measurements (cm): ', 'Μετρήσεις (cm): ') + ms.join(', '));
     ['w', 'fat', 'mus', 'waist', 'arm'].forEach((k) => { const r = rate(k); if (r) l.push(`${k}: ${sgn(r.perWeek, 2)}/${T('week', 'εβδ.')} (${nf(r.weeks)} ${T('weeks', 'εβδ.')})`); });
     const g = data.goals;
-    if (g.w || g.fat || g.mus || g.waist) l.push(T('Goals: ', 'Στόχοι: ') + [g.w ? T(`weight ${nf(g.w)} kg`, `βάρος ${nf(g.w)} kg`) : null, g.fat ? T(`body fat ${nf(g.fat)}%`, `λίπος ${nf(g.fat)}%`) : null, g.mus ? T(`muscle ${nf(g.mus)}%`, `μύες ${nf(g.mus)}%`) : null, g.waist ? T(`waist ${nf(g.waist)} cm`, `μέση ${nf(g.waist)} cm`) : null, g.date ? T(`by ${g.date}`, `έως ${g.date}`) : null].filter(Boolean).join(', '));
-    if (f) l.push(T(`Goal type: ${TYPE[f.type][0]}${f.inferred ? ' (inferred)' : ''}, fit to goals ${nf(f.score)}/10`, `Είδος στόχου: ${TYPE[f.type][0]}${f.inferred ? ' (εκτίμηση)' : ''}, ταίριασμα με τους στόχους ${nf(f.score)}/10`));
+    if (g.w || g.fat || g.mus || g.waist) l.push(T('Targets: ', 'Αριθμητικοί στόχοι: ') + [g.w ? T(`weight ${nf(g.w)} kg`, `βάρος ${nf(g.w)} kg`) : null, g.fat ? T(`body fat ${nf(g.fat)}%`, `λίπος ${nf(g.fat)}%`) : null, g.mus ? T(`muscle ${nf(g.mus)}%`, `μύες ${nf(g.mus)}%`) : null, g.waist ? T(`waist ${nf(g.waist)} cm`, `μέση ${nf(g.waist)} cm`) : null, g.date ? T(`by ${g.date}`, `έως ${g.date}`) : null].filter(Boolean).join(', '));
+    if (f) {
+      if (f.gi.modeWhy) l.push(f.gi.modeWhy);
+      if (f.gi.clash) l.push(f.gi.clash);
+      l.push(T(`Fit of the plan to the goal: ${nf(f.score)}/10`, `Ταίριασμα του προγράμματος με τον στόχο: ${nf(f.score)}/10`));
+    }
     return l;
   }
 
-  // ο στόχος (ορισμένος ή προτεινόμενος από τις μετρήσεις) για τους στόχους σετ ανά μυ
-  function goalType() { const gi = goalInfo(metrics(0)); return gi.type ? { type: gi.type, inferred: !!gi.inferred, label: TYPE[gi.type][0] } : null; }
   // πορεία της περιφέρειας που αντιστοιχεί σε έναν μυ (≥ 6 εβδομάδες μετρήσεων)
   function muscleTrend(mid) {
     const k = Object.keys(MEAS_MUSCLES).find((x) => MEAS_MUSCLES[x].includes(mid));
@@ -335,7 +386,7 @@
     return { key: k, name: MEAS.find((x) => x[0] === k)[1], from: a, to: b, weeks: Math.round(wk), delta: d, state: d <= 0.2 ? 'flat' : 'grow' };
   }
   const sig = () => JSON.stringify(data).length + ':' + data.entries.map((e) => e.id + e.date).join('|') + JSON.stringify(data.profile) + JSON.stringify(data.goals) + '@' + today();
-  const goalLabel = (ctx) => { const mt = metrics(ctx ? ctx.sessions : 0); const gi = goalInfo(mt); return gi.type ? TYPE[gi.type][0] + (gi.inferred ? T(' (suggested)', ' (πρόταση)') : '') : null; };
+  const goalLabel = () => goalType().label;
 
   // ------------------------------------------------------------ DOM
   function h(tag, props, ...kids) {
@@ -359,8 +410,17 @@
   const MUS_HINT = T('as your scale shows it: skeletal muscle (~30–45%) or muscle mass (~70–80%)', 'όπως τη δείχνει η ζυγαριά: σκελετικοί μύες (~30–45%) ή μυϊκή μάζα (~70–80%)');
   const card = (label, value, sub, cls) => h('div', { class: 'bd-card' + (cls ? ' ' + cls : '') }, h('span', { class: 'bd-l', text: label }), h('b', { text: value }), sub ? h('small', { text: sub }) : null);
 
+  // τι ελέγχει η αξιολόγηση με κάθε στόχο
+  function goalDesc(k) {
+    const r = rulesFor(k);
+    if (k === 'cut') return T('Lose fat and keep your muscle: the same 10+ sets per muscle a week as for growth, loads that hold, 3 or more workouts, weight down 0.5–1% a week.', 'Χάνεις λίπος και κρατάς τους μύες: τα ίδια 10+ σετ ανά μυ την εβδομάδα με την ανάπτυξη, φορτία που κρατιούνται, 3 ή περισσότερες προπονήσεις, βάρος −0,5–1% την εβδομάδα.');
+    if (k === 'bulk') return T('Build muscle: 10–20 hard sets per muscle a week, each muscle twice a week, loads that keep going up.', 'Χτίζεις μύες: 10–20 σκληρά σετ ανά μυ την εβδομάδα, κάθε μυς 2 φορές την εβδομάδα, φορτία που ανεβαίνουν συνεχώς.');
+    const n = Math.round(10 * r.sets);
+    return T(`Keep what you have with less training: about ${n} sets per muscle a week, ${r.freq === 1 ? 'once a week is enough' : 'each muscle twice a week'}, loads that hold, stable weight.`, `Κρατάς ό,τι έχεις με λιγότερη προπόνηση: περίπου ${n} σετ ανά μυ την εβδομάδα, ${r.freq === 1 ? '1 φορά την εβδομάδα αρκεί' : 'κάθε μυς 2 φορές την εβδομάδα'}, φορτία που κρατιούνται, σταθερό βάρος.`);
+  }
+
   // πρόχειρα που επιβιώνουν από τα re-render της αξιολόγησης
-  const draft = { profile: null, entry: null, goals: null, msg: '', gmsg: '', pmsg: '', showMeas: false };
+  const draft = { profile: null, entry: null, goals: null, msg: '', gmsg: '', pmsg: '', tmsg: '', showMeas: false };
   const blankEntry = () => ({ date: today(), w: '', fat: '', mus: '', m: {} });
 
   function mountTab(host, ctx) {
@@ -471,7 +531,27 @@
     host.replaceChildren();
     const mt = metrics(ctx.sessions);
     const gi = goalInfo(mt);
-    host.appendChild(h('p', { class: 'sub', text: T('What you want to reach. The kilos follow from the target weight and percentages; you can type either.', 'Τι θέλεις να πετύχεις. Τα κιλά βγαίνουν από το βάρος-στόχο και τα ποσοστά· μπορείς να γράψεις όποιο από τα δύο.') }));
+    host.appendChild(h('p', { class: 'sub', text: T('Choose what you train for, then add the numbers you want to reach. The review of your plan follows your primary goal.', 'Διάλεξε για ποιον σκοπό προπονείσαι και μετά πρόσθεσε τα νούμερα που θέλεις να φτάσεις. Η αξιολόγηση του προγράμματος ακολουθεί τον κύριο στόχο σου.') }));
+
+    // --- κύριος στόχος: αποθηκεύεται αμέσως και αλλάζει τους κανόνες της αξιολόγησης
+    const gt = goalType();
+    const gh = uid();
+    const opts = GOAL_TYPES.map((k) => {
+      const id = uid();
+      const input = h('input', { type: 'radio', name: 'bdGoal', id, value: k, checked: gt.chosen && gt.type === k, 'data-key': 'goal:' + k, onchange: () => {
+        data.goals = Object.assign({}, data.goals, { type: k });
+        draft.tmsg = T(`Saved. The review now follows this goal: ${TYPE[k][0].toLowerCase()}.`, `Αποθηκεύτηκε. Η αξιολόγηση ακολουθεί πλέον αυτόν τον στόχο: ${TYPE[k][0].toLowerCase()}.`);
+        persist();
+        if (host.isConnected) rerender();
+      } });
+      return h('label', { class: 'bd-opt' + (gt.chosen && gt.type === k ? ' on' : ''), for: id }, input, h('span', {}, h('b', { text: TYPE[k][0] }), h('small', { text: goalDesc(k) })));
+    });
+    host.appendChild(h('div', { class: 'bd-box', role: 'radiogroup', 'aria-labelledby': gh },
+      h('h3', { class: 'bd-h', id: gh, text: T('Primary goal', 'Κύριος στόχος') }),
+      h('div', { class: 'bd-opts' }, opts),
+      draft.tmsg ? h('p', { class: 'bd-msg', role: 'status', text: draft.tmsg })
+        : !gt.chosen ? h('p', { class: 'bd-hint', text: T('Not chosen yet: until you choose, the review assumes muscle gain.', 'Δεν έχεις διαλέξει ακόμα: μέχρι τότε η αξιολόγηση θεωρεί ότι θέλεις μυϊκή ανάπτυξη.') }) : null));
+    draft.tmsg = '';
     const g = draft.goals || (draft.goals = { w: data.goals.w ?? '', fat: data.goals.fat ?? '', mus: data.goals.mus ?? '', waist: data.goals.waist ?? '', fatKg: '', musKg: '', date: data.goals.date ?? '' });
     const syncKg = () => {
       const w = num(g.w);
@@ -497,11 +577,12 @@
       if (badNum(g.waist, 40, 200)) errs.push(T('waist 40–200 cm', 'μέση 40–200 cm'));
       if (errs.length) { draft.gmsg = T('Check: ', 'Έλεγξε: ') + errs.join(', ') + '.'; return rerender(); }
       if (g.date && (!isDate(g.date) || g.date <= today())) { draft.gmsg = T('The target date must be in the future.', 'Η ημερομηνία-στόχος πρέπει να είναι στο μέλλον.'); return rerender(); }
-      data.goals = { w, fat, mus, waist: num(g.waist), date: g.date || null, setOn: today() };
-      draft.goals = null; draft.gmsg = T('Goals saved.', 'Οι στόχοι αποθηκεύτηκαν.');
+      data.goals = { type: data.goals.type || null, w, fat, mus, waist: num(g.waist), date: g.date || null, setOn: today() };
+      draft.goals = null; draft.gmsg = T('Targets saved.', 'Οι στόχοι αποθηκεύτηκαν.');
       persist();
     } },
-      h('h3', { class: 'bd-h', text: T('My goals', 'Οι στόχοι μου') }),
+      h('h3', { class: 'bd-h', text: T('My targets', 'Οι αριθμητικοί μου στόχοι') }),
+      h('p', { class: 'bd-hint bd-lead', text: T('Optional. The kilos follow from the target weight and percentages; you can type either.', 'Προαιρετικά. Τα κιλά βγαίνουν από το βάρος-στόχο και τα ποσοστά· μπορείς να γράψεις όποιο από τα δύο.') }),
       h('div', { class: 'bd-grid2' },
         field(T('Target weight (kg)', 'Βάρος-στόχος (kg)'), inputs.w, now(mt.W && mt.W.v, ' kg'), 'bd-wide'),
         field(T('Body fat (%)', 'Λίπος (%)'), inputs.fat, now(mt.fat, '%')),
@@ -510,16 +591,17 @@
         field(T('Muscle (kg)', 'Μύες (kg)'), inputs.musKg, now(mt.musKg, ' kg')),
         field(T('Waist (cm)', 'Μέση (cm)'), numInput(g.waist, (v) => { g.waist = v; }, { step: '0.5' }), mt.meas.waist ? now(mt.meas.waist.v, ' cm') : T('add a waist measurement in the Body tab', 'πρόσθεσε μέτρηση μέσης στην καρτέλα Σώμα'), 'bd-wide'),
         field(T('By (optional)', 'Έως (προαιρετικά)'), h('input', { type: 'date', value: g.date, min: today(), oninput: (e) => { g.date = e.target.value; } }), null, 'bd-wide')),
-      h('button', { class: 'btn primary', type: 'submit', text: T('Save goals', 'Αποθήκευση στόχων') }),
+      h('button', { class: 'btn primary', type: 'submit', text: T('Save targets', 'Αποθήκευση στόχων') }),
       draft.gmsg ? h('p', { class: 'bd-msg', role: 'status', text: draft.gmsg }) : null);
     draft.gmsg = '';
     host.appendChild(form);
 
     // --- πού βρίσκεσαι
-    if (gi.type) {
+    if (gi.set || mt.W) {
       const box = h('div', { class: 'bd-box' });
-      box.appendChild(h('h3', { class: 'bd-h', text: (gi.inferred ? T('Suggested focus: ', 'Προτεινόμενη κατεύθυνση: ') : T('Your goal: ', 'Ο στόχος σου: ')) + TYPE[gi.type][0] }));
-      box.appendChild(h('p', { class: 'bd-hint', text: TYPE[gi.type][1] + (gi.inferred ? T(' Based on your measurements, until you set goals.', ' Με βάση τις μετρήσεις σου, μέχρι να ορίσεις στόχους.') : '') }));
+      box.appendChild(h('h3', { class: 'bd-h', text: (gi.chosen ? T('Your goal: ', 'Ο στόχος σου: ') : T('Default goal: ', 'Προεπιλεγμένος στόχος: ')) + TYPE[gi.type][0] }));
+      box.appendChild(h('p', { class: 'bd-hint bd-lead', text: gi.type === 'bulk' ? gi.modeWhy : TYPE[gi.type][1] }));
+      if (gi.clash) box.appendChild(h('p', { class: 'bd-hint bd-warn', text: gi.clash }));
       const bar = (label, cur, goal, start, u) => {
         if (cur == null || goal == null) return null;
         const from = start != null ? start : cur;
@@ -538,8 +620,10 @@
         bar(T('Waist', 'Μέση'), mt.meas.waist ? mt.meas.waist.v : null, data.goals.waist, first('waist'), 'cm')].forEach((b) => b && box.appendChild(b));
       if (gi.needPerWeek != null && mt.W) {
         const pct = (100 * gi.needPerWeek) / mt.W.v;
-        const tooFast = gi.needPerWeek < 0 ? pct < -1 : pct > 0.5;
-        box.appendChild(h('p', { class: 'bd-hint' + (tooFast ? ' bd-warn' : ''), text: T(`To reach it by ${fmtDate(data.goals.date)}: ${sgn(gi.needPerWeek, 2)} kg a week (${sgn(pct, 2)}%).`, `Για να το πετύχεις έως ${fmtDate(data.goals.date)}: ${sgn(gi.needPerWeek, 2)} kg την εβδομάδα (${sgn(pct, 2)}%).`) + (tooFast ? T(' That is faster than is healthy; give it more time.', ' Είναι πιο γρήγορα από το υγιές· δώσε του περισσότερο χρόνο.') : '') }));
+        const lean = gi.type === 'bulk' && gi.needPerWeek < 0;
+        const tooFast = gi.needPerWeek < 0 ? pct < (lean ? -0.5 : -1) : pct > 0.5;
+        box.appendChild(h('p', { class: 'bd-hint' + (tooFast ? ' bd-warn' : ''), text: T(`To reach it by ${fmtDate(data.goals.date)}: ${sgn(gi.needPerWeek, 2)} kg a week (${sgn(pct, 2)}%).`, `Για να το πετύχεις έως ${fmtDate(data.goals.date)}: ${sgn(gi.needPerWeek, 2)} kg την εβδομάδα (${sgn(pct, 2)}%).`)
+          + (!tooFast ? '' : lean ? T(' That is too fast to build muscle at the same time (keep it to 0.5% a week or less); give it more time.', ' Είναι πολύ γρήγορα για να χτίζεις ταυτόχρονα μύες (κράτα το έως 0,5% την εβδομάδα)· δώσε του περισσότερο χρόνο.') : T(' That is faster than is healthy; give it more time.', ' Είναι πιο γρήγορα από το υγιές· δώσε του περισσότερο χρόνο.')) }));
       }
       if (gi.dMkg != null && gi.dMkg > 0) {
         const months = gi.dMkg / 0.75;
@@ -576,6 +660,15 @@ form.bd-grid3>.bd-h{grid-column:1/-1}
 .bd-msg{margin:8px 0 0;font-size:.85rem;font-weight:600}
 .bd-hint{margin:8px 0 0;font-size:.8rem;color:var(--ink-2)}
 .bd-warn{color:var(--accent);font-weight:600}
+.bd-lead{margin:-4px 0 10px}
+.bd-opts{display:grid;gap:8px}
+.bd-opt{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1.5px solid var(--line);border-radius:10px;background:var(--surface);cursor:pointer}
+.bd-opt.on{border-color:var(--accent);background:var(--accent-soft)}
+.bd-opt input{flex:none;width:18px;height:18px;margin:2px 0 0;accent-color:var(--accent)}
+.bd-opt:focus-within{box-shadow:0 0 0 3px var(--accent-soft)}
+.bd-opt span{display:grid;gap:2px;min-width:0}
+.bd-opt b{font-size:.95rem}
+.bd-opt small{font-size:.78rem;color:var(--ink-2);line-height:1.35}
 .bd-meas{margin-top:10px}
 .bd-meas>summary{cursor:pointer;font-weight:600;font-size:.88rem;padding:6px 0}
 .bd-meas .bd-grid3{margin-top:6px}
@@ -612,5 +705,5 @@ form.bd-grid3>.bd-h{grid-column:1/-1}
   listeners.push(() => { try { window.__mxProgram && window.__mxProgram.onPrograms && window.__mxProgram.onPrograms(); } catch (e) { /* ignore */ } });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initCloud); else initCloud();
 
-  window.__mxBody = { metrics, fit, tips, coachLines, sig, goalLabel, goalType, muscleTrend, fmtCm: (v) => nf(v), mountTab, mountGoals, TYPE, onChange: (f) => listeners.push(f), data: () => JSON.parse(JSON.stringify(data)) };
+  window.__mxBody = { metrics, fit, tips, coachLines, sig, goalLabel, goalType, goalInfo: (sessions) => goalInfo(metrics(sessions || 0)), muscleTrend, fmtCm: (v) => nf(v), mountTab, mountGoals, TYPE, onChange: (f) => listeners.push(f), data: () => JSON.parse(JSON.stringify(data)) };
 })();

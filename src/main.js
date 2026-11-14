@@ -806,17 +806,19 @@ function leaveReview() {
 }
 
 function muscleStatus(m) {
-  if (m.V <= 0) return T(`Not trained. Target: at least ${m.min} sets a week, over 2 sessions.`, `Δεν δουλεύει. Στόχος: τουλάχιστον ${m.min} σετ την εβδομάδα, σε 2 προπονήσεις.`);
+  const twice = (m.freqTarget ?? RULES.freqTarget) >= 2;
+  if (m.V <= 0) return T(`Not trained. Target: at least ${m.min} sets a week${twice ? ', over 2 sessions' : ''}.`, `Δεν δουλεύει. Στόχος: τουλάχιστον ${m.min} σετ την εβδομάδα${twice ? ', σε 2 προπονήσεις' : ''}.`);
   const out = [];
   if (m.V < m.min) out.push(T(`${nf(m.V)} sets a week: about ${Math.ceil(m.min - m.V)} short of the ${m.min}-set target.`, `${nf(m.V)} σετ την εβδομάδα: λείπουν περίπου ${Math.ceil(m.min - m.V)} για τον στόχο των ${m.min}.`));
   else if (m.V <= m.max) out.push(T(`${nf(m.V)} sets a week: within the optimal ${m.min}–${m.max} range.`, `${nf(m.V)} σετ την εβδομάδα: μέσα στο βέλτιστο εύρος ${m.min}–${m.max}.`));
   else if (m.V <= RULES.excess) out.push(T(`${nf(m.V)} sets a week: a little above optimal, fine if you recover well.`, `${nf(m.V)} σετ την εβδομάδα: λίγο πάνω από το βέλτιστο, εντάξει αν αναρρώνεις καλά.`));
   else out.push(T(`${nf(m.V)} sets a week: a lot of volume for little extra benefit.`, `${nf(m.V)} σετ την εβδομάδα: πολύς όγκος με μικρό επιπλέον όφελος.`));
   out.push(m.hits >= 2 ? T(`Trained ${m.hits} times a week.`, `Δουλεύει ${m.hits} φορές την εβδομάδα.`)
-    : m.hits === 1 ? T('Trained once a week (target: twice).', 'Δουλεύει 1 φορά την εβδομάδα (στόχος: 2).')
+    : m.hits === 1 ? (twice ? T('Trained once a week (target: twice).', 'Δουλεύει 1 φορά την εβδομάδα (στόχος: 2).') : T('Trained once a week, which is enough for maintenance.', 'Δουλεύει 1 φορά την εβδομάδα, που αρκεί για διατήρηση.'))
       : T('The sets are scattered: less than 1.5 in any session.', 'Τα σετ είναι σκόρπια: λιγότερα από 1,5 σε κάθε προπόνηση.'));
   if (m.maxS > m.cap) out.push(T(`Up to ${nf(m.maxS)} sets in one session; above about ${m.cap} the returns drop.`, `Έως ${nf(m.maxS)} σετ σε μία προπόνηση· πάνω από ~${m.cap} η απόδοση πέφτει.`));
-  if (m.direct) out.push(T('Only direct ab work counts here (crunches, leg raises, ab wheel, planks…): squats, deadlifts and presses keep the abs but do not grow them. Aim for 8–16 hard sets a week of 8–20 reps, over 2–4 short sessions.', 'Εδώ μετράει μόνο η άμεση δουλειά κοιλιακών (crunches, ανυψώσεις ποδιών, ροδάκι, σανίδες…): τα καθίσματα, οι άρσεις και οι πιέσεις τους διατηρούν αλλά δεν τους μεγαλώνουν. Στόχος 8–16 σκληρά σετ την εβδομάδα με 8–20 επαναλήψεις, σε 2–4 σύντομες προπονήσεις.'));
+  if (m.direct) out.push(T('Only direct ab work counts here (crunches, leg raises, ab wheel, planks…): squats, deadlifts and presses work the abs only a little. ', 'Εδώ μετράει μόνο η άμεση δουλειά κοιλιακών (crunches, ανυψώσεις ποδιών, ροδάκι, σανίδες…): τα καθίσματα, οι άρσεις και οι πιέσεις τους δουλεύουν ελάχιστα. ')
+    + T(`Aim for ${m.min}–${m.max} hard sets a week of 8–20 reps${twice ? ', over 2–4 short sessions' : ''}.`, `Στόχος ${m.min}–${m.max} σκληρά σετ την εβδομάδα με 8–20 επαναλήψεις${twice ? ', σε 2–4 σύντομες προπονήσεις' : ''}.`));
   return out.join(' ');
 }
 
@@ -827,11 +829,12 @@ function muscleParts(m, result) {
   const rows = [];
   rows.push([T('Sets & times a week', 'Σετ & φορές την εβδομάδα'), T('Programs', 'Προγράμματα'), nf(m.base) + '/10',
     g && m.min !== m.baseMin ? T(`target ${m.min}+ sets for ${g.label.toLowerCase()}`, `στόχος ${m.min}+ σετ για ${g.label.toLowerCase()}`) : T(`target ${m.min}+ sets`, `στόχος ${m.min}+ σετ`)]);
-  if (m.prog != null) rows.push([T('Load progression', 'Πρόοδος φορτίου'), T('Progress', 'Πρόοδος'), nf(m.prog) + '/10',
+  const hold = !!(g && g.hold);
+  if (m.prog != null) rows.push([hold ? T('Loads held', 'Διατήρηση φορτίων') : T('Load progression', 'Πρόοδος φορτίου'), T('Progress', 'Πρόοδος'), nf(m.prog) + '/10',
     T(`${m.logged} of ${m.contrib.length} exercises logged`, `${m.logged} από ${m.contrib.length} ασκήσεις καταγεγραμμένες`)]);
   if (m.trend) rows.push([m.trend.name, T('Body', 'Σώμα'), (m.trend.delta >= 0 ? '+' : '−') + window.__mxBody.fmtCm(Math.abs(m.trend.delta)) + ' cm',
     T(`in ${m.trend.weeks} weeks`, `σε ${m.trend.weeks} εβδομάδες`) + (m.trendPenalty ? T(' · not growing: −0.5', ' · δεν μεγαλώνει: −0,5') : '')]);
-  const formula = m.prog != null ? T(`Score = 85% sets & frequency + 15% progression${m.trendPenalty ? ' − 0.5' : ''} = ${nf(m.score)}`, `Βαθμός = 85% σετ & συχνότητα + 15% πρόοδος${m.trendPenalty ? ' − 0,5' : ''} = ${nf(m.score)}`) : '';
+  const formula = m.prog != null ? T(`Score = 85% sets & frequency + 15% ${hold ? 'loads held' : 'progression'}${m.trendPenalty ? ' − 0.5' : ''} = ${nf(m.score)}`, `Βαθμός = 85% σετ & συχνότητα + 15% ${hold ? 'διατήρηση φορτίων' : 'πρόοδος'}${m.trendPenalty ? ' − 0,5' : ''} = ${nf(m.score)}`) : '';
   return `<ul class="rv-mparts">${rows.map(([a, tab, v, note]) => `<li><span>${esc(a)} <small>· ${esc(tab)}</small></span><b>${esc(v)}</b><small>${esc(note)}</small></li>`).join('')}</ul>${formula ? `<p class="rv-mformula">${esc(formula)}</p>` : ''}`;
 }
 
@@ -896,10 +899,20 @@ function tabPrograms(progs) {
     </div>`;
 }
 
+// τι αλλάζει στους βαθμούς των μυών με τον κύριο στόχο (καρτέλα Στόχοι)
+function goalNote(result) {
+  const g = result.goal;
+  if (!g || g.type === 'bulk') return '';
+  const text = g.type === 'cut'
+    ? T('Goal: fat loss. The set targets are the same as for growth, because cutting sets while you eat less costs muscle. Loads that hold count in full and your measurements do not have to grow.', 'Στόχος: απώλεια λίπους. Οι στόχοι σετ είναι ίδιοι με την ανάπτυξη, γιατί η μείωση των σετ όσο τρως λιγότερο κοστίζει μύες. Τα φορτία που κρατιούνται μετράνε πλήρως και οι περιφέρειες δεν χρειάζεται να μεγαλώνουν.')
+    : T(`Goal: maintenance. The set targets are about ${Math.round(100 * g.sets)}% of those for growth and ${g.freq === 1 ? 'once a week per muscle is enough' : 'each muscle still needs two sessions a week'}. Loads that hold count in full.`, `Στόχος: διατήρηση. Οι στόχοι σετ είναι περίπου το ${Math.round(100 * g.sets)}% της ανάπτυξης και ${g.freq === 1 ? 'αρκεί 1 φορά την εβδομάδα ανά μυ' : 'κάθε μυς θέλει ακόμα 2 προπονήσεις την εβδομάδα'}. Τα φορτία που κρατιούνται μετράνε πλήρως.`);
+  return `<p class="rv-note"><span>${esc(text)}</span></p>`;
+}
+
 function tabMuscles(result) {
   return `
-    <p class="sub">${T('Each rating uses all the review tabs: the sets and times a week of the Programs tab, the load progression of the Progress tab, the set target of your goal (Goals and Body tabs) and your body measurements. Sets a week (primary muscle = 1 set, secondary = ½) · times a week · score. Tap a muscle, here or on the body, for details.', 'Κάθε βαθμός χρησιμοποιεί όλες τις καρτέλες της αξιολόγησης: τα σετ και τις φορές την εβδομάδα της καρτέλας Προγράμματα, την πρόοδο φορτίου της καρτέλας Πρόοδος, τον στόχο σετ του στόχου σου (καρτέλες Στόχοι και Σώμα) και τις μετρήσεις του σώματός σου. Σετ την εβδομάδα (κύριος μυς = 1 σετ, βοηθητικός = ½) · φορές την εβδομάδα · βαθμός. Πάτα έναν μυ, εδώ ή πάνω στο σώμα, για λεπτομέρειες.')}</p>
-    ${result.goal && result.goal.type !== 'build' && result.goal.type !== 'bulk' && result.goal.type !== 'recomp' ? `<p class="rv-note"><span>${T(`Goal: ${esc(result.goal.label.toLowerCase())}${result.goal.inferred ? ' (suggested)' : ''}. The set targets are lower than for growth (maintenance volume).`, `Στόχος: ${esc(result.goal.label.toLowerCase())}${result.goal.inferred ? ' (πρόταση)' : ''}. Οι στόχοι σετ είναι χαμηλότεροι από την ανάπτυξη (όγκος συντήρησης).`)}</span></p>` : ''}
+    <p class="sub">${T('Each rating uses all the review tabs: the sets and times a week of the Programs tab, the loads of the Progress tab, the rules of your primary goal (Goals tab) and your body measurements (Body tab). Sets a week (primary muscle = 1 set, secondary = ½) · times a week · score. Tap a muscle, here or on the body, for details.', 'Κάθε βαθμός χρησιμοποιεί όλες τις καρτέλες της αξιολόγησης: τα σετ και τις φορές την εβδομάδα της καρτέλας Προγράμματα, τα φορτία της καρτέλας Πρόοδος, τους κανόνες του κύριου στόχου σου (καρτέλα Στόχοι) και τις μετρήσεις του σώματός σου (καρτέλα Σώμα). Σετ την εβδομάδα (κύριος μυς = 1 σετ, βοηθητικός = ½) · φορές την εβδομάδα · βαθμός. Πάτα έναν μυ, εδώ ή πάνω στο σώμα, για λεπτομέρειες.')}</p>
+    ${goalNote(result)}
     ${result.groups.map((g) => `
       <h3 class="rv-ghead" id="rvg-${g.id}"><span>${esc(g.name)}</span>${pill(g.score, g.band)}</h3>
       <ul class="rv-mrows">${g.muscles.map((m) => {
@@ -958,10 +971,42 @@ const targetOf = (progs) => {
   return act.some((p) => p.id === rv.target) ? rv.target : act[0]?.id ?? progs[0]?.id ?? null;
 };
 
+// εισαγωγή των προτάσεων και οι γενικές αρχές, ανάλογα με τον κύριο στόχο
+function tipsIntro(g) {
+  const t = g ? g.type : 'bulk';
+  if (t === 'cut') return T('The suggestions follow your goal, fat loss: what is missing to keep your muscle while you lose fat (the rule of 10 sets, each muscle twice a week, loads that hold) and for balance between muscles.', 'Οι προτάσεις ακολουθούν τον στόχο σου, την απώλεια λίπους: τι λείπει για να κρατήσεις τους μύες όσο χάνεις λίπος (ο κανόνας των 10 σετ, κάθε μυς 2 φορές την εβδομάδα, φορτία που κρατιούνται) και για την ισορροπία ανάμεσα στους μύες.');
+  if (t === 'maintain') return T(`The suggestions follow your goal, maintenance: what is missing to keep your muscle (about ${Math.round(10 * g.sets)} sets per muscle a week, loads that hold) and for balance between muscles.`, `Οι προτάσεις ακολουθούν τον στόχο σου, τη διατήρηση: τι λείπει για να κρατήσεις τους μύες σου (περίπου ${Math.round(10 * g.sets)} σετ ανά μυ την εβδομάδα, φορτία που κρατιούνται) και για την ισορροπία ανάμεσα στους μύες.`);
+  return T('The suggestions follow your goal, muscle gain: what is missing for the rule of 10 sets, for training each muscle twice a week, for loads that keep going up and for balance between muscles.', 'Οι προτάσεις ακολουθούν τον στόχο σου, τη μυϊκή ανάπτυξη: τι λείπει για τον κανόνα των 10 σετ, για τη συχνότητα 2 φορές την εβδομάδα, για φορτία που ανεβαίνουν και για την ισορροπία ανάμεσα στους μύες.');
+}
+function principles(g) {
+  const t = g ? g.type : 'bulk';
+  const effort = T('Effort: end sets 0–3 reps short of failure, in the 6–30 rep range.', 'Ένταση: τα σετ να τελειώνουν 0–3 επαναλήψεις πριν την αποτυχία, με 6–30 επαναλήψεις.');
+  const [head, items] = t === 'cut' ? [T('What else fat loss needs', 'Τι άλλο χρειάζεται η απώλεια λίπους'), [
+    T('Hold your loads and your sets: the same weight on the bar, the same number of sets. If you run out of energy, eat a little more (a smaller deficit) before you cut training.', 'Κράτα τα φορτία και τα σετ σου: τα ίδια κιλά στη μπάρα, ο ίδιος αριθμός σετ. Αν δεν έχεις ενέργεια, φάε λίγο περισσότερο (μικρότερο έλλειμμα) πριν κόψεις προπόνηση.'),
+    effort,
+    T('A moderate deficit: lose 0.5–1% of your body weight a week. Faster than that costs muscle.', 'Μέτριο έλλειμμα: χάνε 0,5–1% του βάρους σου την εβδομάδα. Πιο γρήγορα κοστίζει μύες.'),
+    T('Protein 2–2.4 g per kg of body weight a day, and 7–9 hours of sleep.', 'Πρωτεΐνη 2–2,4 g ανά κιλό σωματικού βάρους την ημέρα και 7–9 ώρες ύπνος.'),
+  ]] : t === 'maintain' ? [T('What else maintenance needs', 'Τι άλλο χρειάζεται η διατήρηση'), [
+    T('Hold your loads: the same weights and reps are what keep the muscle on fewer sets.', 'Κράτα τα φορτία σου: τα ίδια κιλά και οι ίδιες επαναλήψεις κρατούν τους μύες με λιγότερα σετ.'),
+    effort,
+    T('Eat around your maintenance calories, with protein 1.4–2 g per kg of body weight a day.', 'Τρώγε γύρω στις θερμίδες συντήρησης, με πρωτεΐνη 1,4–2 g ανά κιλό σωματικού βάρους την ημέρα.'),
+    T('7–9 hours of sleep.', '7–9 ώρες ύπνος.'),
+  ]] : [T('What else growth needs', 'Τι άλλο χρειάζεται για ανάπτυξη'), [
+    T('Progressive overload: every 1–2 weeks a little more weight or 1–2 more reps.', 'Προοδευτική επιβάρυνση: κάθε 1–2 εβδομάδες λίγο περισσότερο βάρος ή 1–2 επαναλήψεις.'),
+    effort,
+    T('Rest 2–3 minutes on the big lifts, 1–2 on isolation exercises.', 'Ανάπαυση 2–3 λεπτά στις βασικές ασκήσεις, 1–2 στις απομονωμένες.'),
+    T('Protein 1.6–2.2 g per kg of body weight a day, and 7–9 hours of sleep.', 'Πρωτεΐνη 1,6–2,2 g ανά κιλό σωματικού βάρους την ημέρα και 7–9 ώρες ύπνος.'),
+  ]];
+  return `<div class="rv-principles">
+      <h3>${head}</h3>
+      <ul class="notes">${items.map((x) => `<li>${x}</li>`).join('')}</ul>
+    </div>`;
+}
+
 function tabTips(result, progs) {
   if (!rv.tips) {
     return `
-      <p class="sub">${T('The suggestions come from the analysis: what is missing for the rule of 10 sets, for training each muscle twice a week and for balance between muscles.', 'Οι προτάσεις βγαίνουν από την ανάλυση: τι λείπει για τον κανόνα των 10 σετ, για τη συχνότητα 2 φορές την εβδομάδα και για την ισορροπία ανάμεσα στους μύες.')}</p>
+      <p class="sub">${tipsIntro(result.goal)}</p>
       <div class="actions"><button type="button" class="btn primary" data-showtips>${T('Give me suggestions to improve', 'Δώσε μου προτάσεις βελτίωσης')}</button></div>`;
   }
   const tips = suggest(result, progs, exById);
@@ -986,15 +1031,7 @@ function tabTips(result, progs) {
       ${coach?.msg ? `<p class="msg">${esc(coach.msg)}</p>` : ''}
       ${coach?.status !== 'thinking' ? `<button type="button" class="btn ghost" data-coach>${coach?.text ? T('Ask for a new opinion', 'Ζήτα νέα γνώμη') : T('Ask for an opinion on the whole program', 'Ζήτα γνώμη για όλο το πρόγραμμα')}</button>` : ''}
     </div>` : ''}
-    <div class="rv-principles">
-      <h3>${T('What else growth needs', 'Τι άλλο χρειάζεται για ανάπτυξη')}</h3>
-      <ul class="notes">
-        <li>${T('Progressive overload: every 1–2 weeks a little more weight or 1–2 more reps.', 'Προοδευτική επιβάρυνση: κάθε 1–2 εβδομάδες λίγο περισσότερο βάρος ή 1–2 επαναλήψεις.')}</li>
-        <li>${T('Effort: end sets 0–3 reps short of failure, in the 6–30 rep range.', 'Ένταση: τα σετ να τελειώνουν 0–3 επαναλήψεις πριν την αποτυχία, με 6–30 επαναλήψεις.')}</li>
-        <li>${T('Rest 2–3 minutes on the big lifts, 1–2 on isolation exercises.', 'Ανάπαυση 2–3 λεπτά στις βασικές ασκήσεις, 1–2 στις απομονωμένες.')}</li>
-        <li>${T('Protein 1.6–2.2 g per kg of body weight a day, and 7–9 hours of sleep.', 'Πρωτεΐνη 1,6–2,2 g ανά κιλό σωματικού βάρους την ημέρα και 7–9 ώρες ύπνος.')}</li>
-      </ul>
-    </div>`;
+    ${principles(result.goal)}`;
 }
 
 // fresh: νέα καρτέλα (πάνω-πάνω) · ifChanged: μόνο αν άλλαξαν τα δεδομένα · scrollTo/focus: επιλογείς
@@ -1025,8 +1062,9 @@ function renderReview({ fresh = false, ifChanged = false, scrollTo = null, focus
     art.addEventListener('click', onReviewClick);
     art.addEventListener('change', onReviewChange);
   }
-  const goalName = window.__mxBody?.goalLabel({ sessions: result.weeklySessions }) || T('muscle growth', 'μυϊκή ανάπτυξη');
-  const eyebrow = `<div class="eyebrow"><span>${T('Program review', 'Αξιολόγηση προγράμματος')}</span><span class="tag">${T('Goal: ', 'Στόχος: ')}${esc(goalName.charAt(0).toLowerCase() + goalName.slice(1))}</span></div>`;
+  // ο κύριος στόχος (καρτέλα Στόχοι): με αυτόν βγαίνει όλη η αξιολόγηση· το κουμπί ανοίγει την επιλογή του
+  const goalName = (window.__mxBody?.goalLabel() || T('Muscle gain', 'Μυϊκή ανάπτυξη')).toLowerCase();
+  const eyebrow = `<div class="eyebrow"><span>${T('Program review', 'Αξιολόγηση προγράμματος')}</span><button type="button" class="tag tagbtn" data-tab="goals" data-key="goaltag" aria-label="${esc(T(`Goal: ${goalName}. Change your goal`, `Στόχος: ${goalName}. Άλλαξε τον στόχο σου`))}">${T('Goal: ', 'Στόχος: ')}${esc(goalName)} <span aria-hidden="true">›</span></button></div>`;
   if (!ready) {
     art.innerHTML = `${eyebrow}<h2>${T('Your programs', 'Τα προγράμματά σου')}</h2><div class="thinking"><i class="pulse"></i><span>${T('Loading your programs…', 'Φόρτωση των προγραμμάτων σου…')}</span></div>`;
     if (state.mode === 'review') applyModelState(false);
@@ -1040,7 +1078,7 @@ function renderReview({ fresh = false, ifChanged = false, scrollTo = null, focus
     <div class="rv-head">
       <div class="rv-ring" style="--p:${result.overall / 10};--c:${BANDS[ob].color}" role="img" aria-label="${esc(T(`Overall score ${nf(result.overall)} out of 10`, `Συνολικός βαθμός ${nf(result.overall)} στα 10`))}"><b>${nf(result.overall)}</b><small>/10</small></div>
       <div class="rv-headtxt">
-        <h2>${esc(verdict(result.overall))}</h2>
+        <h2>${esc(verdict(result.overall, result.goal?.type))}</h2>
         <p class="sub">${T(`${nSess} ${nSess === 1 ? 'session' : 'sessions'} a week · ${result.weeklySets} sets · ${result.onTarget} of ${result.muscles.length} muscles on target`, `${nSess} ${nSess === 1 ? 'προπόνηση' : 'προπονήσεις'} την εβδομάδα · ${result.weeklySets} σετ · ${result.onTarget} από ${result.muscles.length} μύες στον στόχο`)}</p>
       </div>
     </div>
@@ -1049,7 +1087,7 @@ function renderReview({ fresh = false, ifChanged = false, scrollTo = null, focus
       <div><span>${T('Volume', 'Όγκος')}</span>${pill(result.sub.volume, bandForScore(result.sub.volume))}</div>
       <div><span>${T('Frequency', 'Συχνότητα')}</span>${pill(result.sub.frequency, bandForScore(result.sub.frequency))}</div>
       <div><span>${T('Balance', 'Ισορροπία')}</span>${pill(result.sub.balance, bandForScore(result.sub.balance))}</div>
-      <div><span>${T('Progression', 'Πρόοδος φορτίου')}</span>${pill(result.sub.overload, bandForScore(result.sub.overload))}</div>
+      <div><span>${result.goal?.hold ? T('Loads held', 'Διατήρηση φορτίων') : T('Progression', 'Πρόοδος φορτίου')}</span>${pill(result.sub.overload, bandForScore(result.sub.overload))}</div>
       ${result.sub.goals != null ? `<button type="button" class="rv-subbtn" data-tab="goals" data-key="sub:goals"><span>${T('Goals', 'Στόχοι')}</span>${pill(result.sub.goals, bandForScore(result.sub.goals))}</button>` : ''}
     </div>
     <div class="rv-gbars">${result.groups.map((g) => `
@@ -1065,15 +1103,16 @@ function renderReview({ fresh = false, ifChanged = false, scrollTo = null, focus
     <details class="rv-method">
       <summary>${T('How the score works', 'Πώς βγαίνει ο βαθμός')}</summary>
       <ul class="notes">
+        <li>${T('Your primary goal (Goals tab) sets the rules. Muscle gain, the default: everything below, with loads that keep going up. Fat loss: the same sets and frequency, because cutting sets while you eat less costs muscle; loads that hold count in full and your measurements do not have to grow. Maintenance: about 60% of the sets and once a week per muscle are enough, as long as the loads hold (from age 60: about 80% and twice a week).', 'Ο κύριος στόχος σου (καρτέλα Στόχοι) ορίζει τους κανόνες. Μυϊκή ανάπτυξη, η προεπιλογή: όλα τα παρακάτω, με φορτία που ανεβαίνουν συνεχώς. Απώλεια λίπους: ίδια σετ και συχνότητα, γιατί η μείωση των σετ όσο τρως λιγότερο κοστίζει μύες· τα φορτία που κρατιούνται μετράνε πλήρως και οι περιφέρειες δεν χρειάζεται να μεγαλώνουν. Διατήρηση: περίπου το 60% των σετ και 1 φορά την εβδομάδα ανά μυ αρκούν, όσο τα φορτία κρατιούνται (από τα 60: περίπου 80% και 2 φορές την εβδομάδα).')}</li>
         <li>${T('We count hard sets (6–30 reps, ending 0–3 reps short of failure). The primary muscle of an exercise gets 1 set, a secondary muscle ½.', 'Μετράμε σκληρά σετ (6–30 επαναλήψεις, 0–3 πριν την αποτυχία). Ο κύριος μυς μιας άσκησης παίρνει 1 σετ, ο βοηθητικός ½.')}</li>
         <li>${T('Volume, the rule of 10: each muscle group needs at least 10 sets a week, ideally 10–20. Below that the score drops in proportion (6 sets = 6/10). The small assisting muscles (rotator cuff, forearms, shins, hip flexors, front delts, upper traps, obliques, brachialis) need at least 6.', 'Όγκος, ο κανόνας του 10: κάθε μυϊκή ομάδα θέλει τουλάχιστον 10 σετ την εβδομάδα, ιδανικά 10–20. Με λιγότερα ο βαθμός πέφτει αναλογικά (6 σετ = 6/10). Οι μικροί βοηθητικοί μύες (στροφικό πέταλο, πήχεις, κνήμη, καμπτήρες ισχίου, μπροστινός ώμος, άνω τραπεζοειδής, λοξοί, βραχιόνιος) θέλουν τουλάχιστον 6.')}</li>
         <li>${T('Abs are scored differently: only direct ab exercises count (the big lifts maintain the abs but hardly grow them), the target is 8–16 hard sets a week over at least 2 sessions, and up to about 8 sets in one session (abs recover fast, so total weekly sets matter more than how often).', 'Οι κοιλιακοί βαθμολογούνται αλλιώς: μετράνε μόνο οι ασκήσεις κοιλιακών (τα μεγάλα πολυαρθρικά τους διατηρούν αλλά σχεδόν δεν τους μεγαλώνουν), ο στόχος είναι 8–16 σκληρά σετ την εβδομάδα σε τουλάχιστον 2 προπονήσεις και έως ~8 σετ σε μία (αναρρώνουν γρήγορα, οπότε μετράνε περισσότερο τα συνολικά σετ της εβδομάδας παρά η συχνότητα).')}</li>
-        <li>${T('Frequency: each muscle at least twice a week (a session counts when it gives the muscle 1.5 sets or more).', 'Συχνότητα: κάθε μυς τουλάχιστον 2 φορές την εβδομάδα (μια προπόνηση μετράει αν δίνει ≥1,5 σετ στον μυ).')}</li>
+        <li>${T('Frequency: each muscle at least twice a week (a session counts when it gives the muscle 1.5 sets or more). With maintenance as your goal, once a week is enough.', 'Συχνότητα: κάθε μυς τουλάχιστον 2 φορές την εβδομάδα (μια προπόνηση μετράει αν δίνει ≥1,5 σετ στον μυ). Με στόχο τη διατήρηση αρκεί 1 φορά την εβδομάδα.')}</li>
         <li>${T('Distribution: up to about 10 sets for the same muscle in one session.', 'Κατανομή: έως ~10 σετ για τον ίδιο μυ σε μία προπόνηση.')}</li>
-        <li>${T('Muscle score, from all the review tabs: 85% sets & frequency (Programs tab: 70% volume + 25% frequency + 5% distribution) + 15% load progression of the exercises that train it (Progress tab, weighted by their sets). With fat loss or maintenance as your goal (Goals and Body tabs) the set target drops to about 70% or 60% of the rule of 10. A measurement that has not grown for 6+ weeks while you aim for growth (Body tab) takes 0.5 off. Group score = average of its muscles, with the big muscles counting three times.', 'Βαθμός μυός, από όλες τις καρτέλες της αξιολόγησης: 85% σετ & συχνότητα (καρτέλα Προγράμματα: 70% όγκος + 25% συχνότητα + 5% κατανομή) + 15% πρόοδος φορτίου των ασκήσεων που τον δουλεύουν (καρτέλα Πρόοδος, με βάρος τα σετ τους). Με στόχο απώλεια λίπους ή διατήρηση (καρτέλες Στόχοι και Σώμα) ο στόχος σετ πέφτει περίπου στο 70% ή 60% του κανόνα των 10. Μια περιφέρεια που δεν μεγαλώνει 6+ εβδομάδες ενώ στοχεύεις ανάπτυξη (καρτέλα Σώμα) αφαιρεί 0,5. Ομάδα = μέσος όρος των μυών της, με τους μεγάλους μύες να μετράνε τριπλά.')}</li>
+        <li>${T('Muscle score, from all the review tabs: 85% sets & frequency (Programs tab: 70% volume + 25% frequency + 5% distribution) + 15% load progression of the exercises that train it (Progress tab, weighted by their sets). A measurement that has not grown for 6+ weeks while your goal is muscle gain (Body tab) takes 0.5 off. Group score = average of its muscles, with the big muscles counting three times.', 'Βαθμός μυός, από όλες τις καρτέλες της αξιολόγησης: 85% σετ & συχνότητα (καρτέλα Προγράμματα: 70% όγκος + 25% συχνότητα + 5% κατανομή) + 15% πρόοδος φορτίου των ασκήσεων που τον δουλεύουν (καρτέλα Πρόοδος, με βάρος τα σετ τους). Μια περιφέρεια που δεν μεγαλώνει 6+ εβδομάδες ενώ ο στόχος σου είναι η μυϊκή ανάπτυξη (καρτέλα Σώμα) αφαιρεί 0,5. Ομάδα = μέσος όρος των μυών της, με τους μεγάλους μύες να μετράνε τριπλά.')}</li>
         <li>${T('Overall score = 87% the muscles + 13% balance (push/pull, quads/hamstrings, upper/lower body).', 'Συνολικός βαθμός = 87% οι μύες + 13% ισορροπία (ώθηση/έλξη, τετρακέφαλοι/οπίσθιοι, άνω/κάτω σώμα).')}</li>
-        <li>${T('Goals: when you add your body data (Body tab), 10% of the score is how well the plan fits your goal (fat loss, muscle gain, recomposition or maintenance): workouts a week, volume and progression for that goal, and, once you have measurements over 2+ weeks, whether your weight is moving at a healthy pace toward it. Without goals, the focus is suggested from your measurements.', 'Στόχοι: όταν προσθέσεις στοιχεία σώματος (καρτέλα Σώμα), το 10% του βαθμού είναι πόσο ταιριάζει το πρόγραμμα στον στόχο σου (απώλεια λίπους, μυϊκή ανάπτυξη, ανασύνθεση ή διατήρηση): προπονήσεις την εβδομάδα, όγκος και πρόοδος φορτίου για αυτόν τον στόχο και, όταν υπάρχουν μετρήσεις 2+ εβδομάδων, αν το βάρος σου κινείται με υγιή ρυθμό προς αυτόν. Χωρίς στόχους, η κατεύθυνση προτείνεται από τις μετρήσεις σου.')}</li>
-        <li>${T('Progressive overload (the Progression figure above): half is how many of your exercises have logged sets, the other half is whether you keep raising them. After 2 weeks at the same load you are ready to progress; after 4 weeks the lift counts as stalled. Log each set in the Progress tab; the number of sets comes from the Programs tab.', 'Πρόοδος φορτίου (ο δείκτης «Πρόοδος φορτίου» παραπάνω): το μισό είναι πόσες ασκήσεις έχουν καταγεγραμμένα σετ και το άλλο μισό αν συνεχίζεις να τα ανεβάζεις. Μετά από 2 εβδομάδες με το ίδιο φορτίο είσαι έτοιμος να ανέβεις· μετά από 4 εβδομάδες η άσκηση θεωρείται κολλημένη. Κατάγραψε κάθε σετ στην καρτέλα Πρόοδος· ο αριθμός των σετ έρχεται από την καρτέλα Προγράμματα.')}</li>
+        <li>${T('Goals: once you choose a goal or add body data (Goals and Body tabs), 10% of the score is how well the plan fits your goal: workouts a week, volume and loads for that goal, and, once you have measurements over 2+ weeks, whether your weight is moving at the right pace for it. With muscle gain, your target weight sets that pace: a small surplus when it is above your weight, a stable weight when it is the same, and building muscle while slowly losing fat when it is below.', 'Στόχοι: μόλις διαλέξεις στόχο ή προσθέσεις στοιχεία σώματος (καρτέλες Στόχοι και Σώμα), το 10% του βαθμού είναι πόσο ταιριάζει το πρόγραμμα στον στόχο σου: προπονήσεις την εβδομάδα, όγκος και φορτία για αυτόν τον στόχο και, όταν υπάρχουν μετρήσεις 2+ εβδομάδων, αν το βάρος σου κινείται με τον σωστό ρυθμό γι’ αυτόν. Στη μυϊκή ανάπτυξη τον ρυθμό τον ορίζει το βάρος-στόχος: μικρό πλεόνασμα όταν είναι πάνω από το βάρος σου, σταθερό βάρος όταν είναι το ίδιο και μύες με αργή απώλεια λίπους όταν είναι κάτω.')}</li>
+        <li>${T('Progressive overload (the Progression figure above): half is how many of your exercises have logged sets, the other half is whether you keep raising them. After 2 weeks at the same load you are ready to progress; after 4 weeks the lift counts as stalled. With fat loss or maintenance as your goal the figure is called Loads held: a level that stays the same counts in full, and only a level lower than the one before brings it down. Log each set in the Progress tab; the number of sets comes from the Programs tab.', 'Πρόοδος φορτίου (ο δείκτης «Πρόοδος φορτίου» παραπάνω): το μισό είναι πόσες ασκήσεις έχουν καταγεγραμμένα σετ και το άλλο μισό αν συνεχίζεις να τα ανεβάζεις. Μετά από 2 εβδομάδες με το ίδιο φορτίο είσαι έτοιμος να ανέβεις· μετά από 4 εβδομάδες η άσκηση θεωρείται κολλημένη. Με στόχο απώλεια λίπους ή διατήρηση ο δείκτης λέγεται «Διατήρηση φορτίων»: ένα επίπεδο που μένει ίδιο μετράει πλήρως και τον κατεβάζει μόνο ένα επίπεδο χαμηλότερο από το προηγούμενο. Κατάγραψε κάθε σετ στην καρτέλα Πρόοδος· ο αριθμός των σετ έρχεται από την καρτέλα Προγράμματα.')}</li>
       </ul>
     </details>`;
   if (window.__mxProg && rv.tab === 'progress') window.__mxProg.mountTab(art.querySelector('#rvProg'), progs);
@@ -1245,6 +1284,7 @@ async function runCoach() {
     const text = await coachReview(summaryText(lastResult, reviewPrograms(), exById), {
       signal: ctl.signal,
       again,
+      goal: lastResult.goal,
       onText: ({ text: t }) => { rv.coach.text = t; const out = $('#rvCoachOut'); if (out) out.innerHTML = coachHtml(t); },
     });
     rv.coach = { status: 'done', text };
