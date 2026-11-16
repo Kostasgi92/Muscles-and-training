@@ -814,6 +814,11 @@ button { cursor: pointer; }
 .rv-method { margin-top: 20px; font-size: .86rem; }
 .rv-method summary { cursor: pointer; color: var(--ink-2); font-weight: 600; }
 .rv-method ul { margin-top: 8px; }
+.rv-sources { margin-top: 14px; }
+.rv-sources h4 { margin: 14px 0 0; font-size: .72rem; text-transform: uppercase; letter-spacing: .09em; color: var(--ink-2); }
+.rv-sources .sub { margin: 8px 0 0; font-size: .82rem; }
+.rv-sources a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.rv-sources a:hover { color: var(--accent); }
 .legend.rv-legend .lg-title { font-weight: 700; }
 @media (max-width: 600px) {
   .legend.rv-legend { font-size: .68rem; display: grid; grid-template-columns: auto auto; gap: 3px 10px; padding: 6px 8px; }

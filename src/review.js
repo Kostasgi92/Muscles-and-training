@@ -1,7 +1,7 @@
 // Αξιολόγηση προγράμματος με βάση τον κύριο στόχο του χρήστη: μυϊκή ανάπτυξη (προεπιλογή), απώλεια λίπους ή
 // διατήρηση (addons/body.js goalType). Οι κανόνες παρακάτω είναι της ανάπτυξης· ο στόχος αλλάζει:
-//  • Απώλεια λίπους: ίδια σετ και συχνότητα (η μείωση του όγκου σε έλλειμμα κοστίζει μύες)· αντί για αύξηση φορτίων
-//    μετράει η διατήρησή τους και οι περιφέρειες δεν χρειάζεται να μεγαλώνουν.
+//  • Απώλεια λίπους: ίδια σετ και συχνότητα (στις μελέτες με δίαιτα όσοι κράτησαν ≥10 σετ ανά μυ έχασαν ελάχιστη ή
+//    καθόλου μυϊκή μάζα)· αντί για αύξηση φορτίων μετράει η διατήρησή τους και οι περιφέρειες δεν χρειάζεται να μεγαλώνουν.
 //  • Διατήρηση: ~60% των σετ και 1 φορά την εβδομάδα ανά μυ αρκούν, όσο τα φορτία κρατιούνται.
 //
 // Κανόνες (όπως θα τους έβαζε ένας προπονητής, με βάση τη σύγχρονη έρευνα):
@@ -18,6 +18,10 @@
 //  • Ομάδα = σταθμισμένος μέσος όρος των μυών της (μεγάλοι ×3, μεσαίοι ×2, μικροί ×1).
 //  • Συνολικός βαθμός = 85% μύες + 15% ισορροπία (ώθηση/έλξη, τετρακέφαλοι/οπίσθιοι, άνω/κάτω σώμα).
 
+// Δύο αρχές για κάθε συμβουλή (προτάσεις, κείμενα, γνώμη προπονητή):
+//  1. Στηρίζεται σε αναγνωρισμένη έρευνα: θέσεις επιστημονικών φορέων, μετα-αναλύσεις, κλινικές μελέτες (evidence.js).
+//     Όπου η έρευνα είναι λίγη, ο κανόνας είναι συντηρητικός, μετράει λίγο στον βαθμό και το λέμε.
+//  2. Είναι προσαρμοσμένη στον κύριο στόχο του χρήστη (μυϊκή ανάπτυξη, απώλεια λίπους, διατήρηση): καμία γενική συμβουλή.
 import { T, LANG } from './lang.js';
 
 export const RULES = { min: 10, minorMin: 6, max: 20, excess: 25, sessionCap: 10, freqTarget: 2, hit: 1.5 };
@@ -85,6 +89,15 @@ export function roleOf(ex, ids) {
   return 0;
 }
 
+// Οστά. Το οστό δυναμώνει (ή κρατιέται) εκεί που φορτώνεται: πολυαρθρικές ασκήσεις ποδιών, άρσεις από το ισχίο,
+// όρθιες/κατακόρυφες πιέσεις, κωπηλατικές με σκυφτό κορμό και μεταφορές με βάρος φορτώνουν ισχίο και σπονδυλική στήλη.
+// Η θέση του ACSM για την υγεία των οστών (Kohrt et al. 2004) ζητά ασκήσεις με αντίσταση 2–3 φορές την εβδομάδα,
+// μέτριας έως υψηλής έντασης ως προς τη φόρτιση των οστών. Δίνει συχνότητα, όχι αριθμό σετ: μια προπόνηση μετράει
+// όταν έχει τουλάχιστον μία ολόκληρη τέτοια άσκηση (3 σετ).
+export const BONE_LIFTS = new Set(['squat', 'front_squat', 'goblet_squat', 'bulgarian_split_squat', 'lunge', 'db_lunge', 'walking_lunge', 'lateral_lunge', 'step_up', 'leg_press', 'hack_squat',
+  'deadlift', 'rdl', 'sumo_deadlift', 'single_leg_rdl', 'good_morning', 'hip_thrust', 'kettlebell_swing', 'power_clean', 'hyperextension',
+  'ohp', 'db_shoulder_press', 'arnold_press', 'barbell_row', 't_bar_row', 'shrug', 'farmers_walk', 'suitcase_carry', 'calf_raise']);
+export const BONE_RULE = { sessions: 2, sets: 3 };
 // άσκηση «κορμού»: όλοι οι κύριοι μύες της είναι κοιλιακοί/κορμός/καμπτήρες ισχίου
 const CORE_IDS = ['rectus_abd', 'ext_oblique', 'int_oblique', 'transversus', 'quadratus_lumb', 'iliopsoas'];
 const isCoreEx = (ex) => ex.p.length > 0 && ex.p.every((t) => CORE_IDS.some((c) => t === c || t.startsWith(c + '.')));
@@ -140,7 +153,7 @@ export function analyze(programs, exById) {
   // κάθε επανάληψη ενός προγράμματος μέσα στην εβδομάδα = μία προπόνηση
   const sessions = [];
   for (const p of active) {
-    for (let k = 0; k < p.perWeek; k++) sessions.push({ program: p, sets: new Map(), total: 0 });
+    for (let k = 0; k < p.perWeek; k++) sessions.push({ program: p, sets: new Map(), total: 0, bone: 0 });
   }
   // καρτέλα Στόχοι (addons/body.js): ο κύριος στόχος αλλάζει τα σετ και τις φορές την εβδομάδα που χρειάζεται κάθε μυς
   const bodyApi = typeof window !== 'undefined' ? window.__mxBody : null;
@@ -153,6 +166,7 @@ export function analyze(programs, exById) {
       const ex = exById.get(it.ex);
       if (!ex || !(it.sets > 0)) continue;
       s.total += it.sets;
+      if (BONE_LIFTS.has(ex.id)) s.bone += it.sets;
       for (const m of muscles) {
         const r = roleFor(ex, m);
         if (r) s.sets.set(m.id, (s.sets.get(m.id) ?? 0) + r * it.sets);
@@ -235,9 +249,11 @@ export function analyze(programs, exById) {
   // πρόοδος φορτίου (addons/progress.js): μετράει μέσα στον βαθμό κάθε μυός (15%)· εδώ ο συνολικός δείκτης
   const overload = prog ? prog.overload(active, exById) : null;
   // ταίριασμα με το σώμα και τους στόχους (addons/body.js): όταν υπάρχουν στοιχεία, μετράει 10%
+  // οστά: προπονήσεις της εβδομάδας με βαριές ασκήσεις που φορτώνουν ισχίο και σπονδυλική στήλη
+  const bone = { sessions: sessions.filter((s) => s.bone >= BONE_RULE.sets).length, sets: sessions.reduce((a, s) => a + s.bone, 0), target: BONE_RULE.sessions };
   const bodyFit = bodyApi && sessions.length ? bodyApi.fit({
     sessions: sessions.length, volume: wmean(muscles, 'vol'), overload: overload ? overload.score : null,
-    maxSession: sessions.reduce((a, s) => Math.max(a, s.total), 0), groups,
+    maxSession: sessions.reduce((a, s) => Math.max(a, s.total), 0), groups, bone,
   }) : null;
   let overall = sessions.length ? (overload ? 0.87 * musclePart + 0.13 * balance : 0.85 * musclePart + 0.15 * balance) : 0;
   if (bodyFit) overall = 0.9 * overall + 0.1 * bodyFit.score;
@@ -245,6 +261,7 @@ export function analyze(programs, exById) {
   return {
     overload,
     bodyFit,
+    bone,
     goal,
     sessions,
     weeklySessions: sessions.length,
@@ -318,7 +335,11 @@ export function suggest(result, programs, exById) {
   const fq = goal ? goal.freq : RULES.freqTarget;
 
   if (!sessions) {
-    out.push({ kind: 'start', title: T('Start with a program', 'Ξεκίνα από ένα πρόγραμμα'), text: T('Tick at least one program for your week, or add a ready-made template. A good start is Upper/Lower twice a week: it covers the whole body in 4 sessions.', 'Τσέκαρε τουλάχιστον ένα πρόγραμμα για την εβδομάδα ή πρόσθεσε ένα έτοιμο πρότυπο. Για αρχή, το Άνω/Κάτω σώμα 2 φορές την εβδομάδα καλύπτει όλο το σώμα σε 4 προπονήσεις.'), actions: [{ type: 'template', id: 'upper' }, { type: 'template', id: 'lower' }] });
+    const tick = T('Tick at least one program for your week, or add a ready-made template. ', 'Τσέκαρε τουλάχιστον ένα πρόγραμμα για την εβδομάδα ή πρόσθεσε ένα έτοιμο πρότυπο. ');
+    if (gtype === 'maintain') out.push({ kind: 'start', title: T('Start with a program', 'Ξεκίνα από ένα πρόγραμμα'), text: tick + T('For maintenance, two full-body sessions a week are enough to keep your muscle and load your bones.', 'Για διατήρηση αρκούν δύο προπονήσεις όλου του σώματος την εβδομάδα, για να κρατήσεις τους μύες και να φορτώνεις τα οστά σου.'), actions: [{ type: 'template', id: 'fullA' }, { type: 'template', id: 'fullB' }] });
+    else out.push({ kind: 'start', title: T('Start with a program', 'Ξεκίνα από ένα πρόγραμμα'), text: tick + (gtype === 'cut'
+      ? T('For fat loss a good start is Upper/Lower twice a week: 4 sessions that keep every muscle at its 10 weekly sets while you diet.', 'Για απώλεια λίπους, καλή αρχή είναι το Άνω/Κάτω σώμα 2 φορές την εβδομάδα: 4 προπονήσεις που κρατούν κάθε μυ στα 10 εβδομαδιαία σετ όσο κάνεις δίαιτα.')
+      : T('For muscle gain a good start is Upper/Lower twice a week: it trains the whole body twice in 4 sessions.', 'Για μυϊκή ανάπτυξη, καλή αρχή είναι το Άνω/Κάτω σώμα 2 φορές την εβδομάδα: γυμνάζει όλο το σώμα 2 φορές σε 4 προπονήσεις.')), actions: [{ type: 'template', id: 'upper' }, { type: 'template', id: 'lower' }] });
     return out;
   }
 
@@ -327,9 +348,9 @@ export function suggest(result, programs, exById) {
   const lower = ['glutes', 'quads', 'hamstrings', 'calves'];
   const avg = (ids) => ids.reduce((a, id) => a + V(id), 0) / ids.length;
   if (avg(upper) < 3 && avg(lower) >= 4) {
-    out.push({ kind: 'region', title: T('Almost the whole upper body is missing', 'Λείπει σχεδόν όλο το άνω σώμα'), text: T('Chest, back, shoulders and biceps get few or no sets. The most efficient fix is an upper-body session twice a week: it brings all of these muscles close to 10 sets.', 'Στήθος, πλάτη, ώμοι και δικέφαλοι έχουν ελάχιστα ή καθόλου σετ. Η πιο αποδοτική λύση είναι μια προπόνηση άνω σώματος 2 φορές την εβδομάδα: φέρνει όλους αυτούς τους μύες κοντά στα 10 σετ.'), actions: [{ type: 'template', id: 'upper' }] });
+    out.push({ kind: 'region', title: T('Almost the whole upper body is missing', 'Λείπει σχεδόν όλο το άνω σώμα'), text: T(`Chest, back, shoulders and biceps get few or no sets. The most efficient fix is an upper-body session${fq >= 2 ? ' twice a week' : ''}: it brings all of these muscles close to their ${gtype === 'maintain' ? 'maintenance ' : ''}targets.`, `Στήθος, πλάτη, ώμοι και δικέφαλοι έχουν ελάχιστα ή καθόλου σετ. Η πιο αποδοτική λύση είναι μια προπόνηση άνω σώματος${fq >= 2 ? ' 2 φορές την εβδομάδα' : ''}: φέρνει όλους αυτούς τους μύες κοντά στους στόχους τους${gtype === 'maintain' ? ' για διατήρηση' : ''}.`), actions: [{ type: 'template', id: 'upper' }] });
   } else if (avg(lower) < 3 && avg(upper) >= 4) {
-    out.push({ kind: 'region', title: T('Almost the whole lower body is missing', 'Λείπει σχεδόν όλο το κάτω σώμα'), text: T('Quads, hamstrings, glutes and calves get very few sets. Add a leg session twice a week.', 'Τετρακέφαλοι, οπίσθιοι, γλουτοί και γάμπες έχουν ελάχιστα σετ. Πρόσθεσε μια προπόνηση ποδιών 2 φορές την εβδομάδα.'), actions: [{ type: 'template', id: 'lower' }] });
+    out.push({ kind: 'region', title: T('Almost the whole lower body is missing', 'Λείπει σχεδόν όλο το κάτω σώμα'), text: T(`Quads, hamstrings, glutes and calves get very few sets. Add a leg session${fq >= 2 ? ' twice a week' : ''}: the legs hold your biggest muscles${gtype === 'cut' ? ', which burn the most energy,' : ''} and leg lifts are what load the bones of your hips and spine.`, `Τετρακέφαλοι, οπίσθιοι, γλουτοί και γάμπες έχουν ελάχιστα σετ. Πρόσθεσε μια προπόνηση ποδιών${fq >= 2 ? ' 2 φορές την εβδομάδα' : ''}: στα πόδια είναι οι μεγαλύτεροι μύες σου${gtype === 'cut' ? ', που καίνε την περισσότερη ενέργεια,' : ''} και οι ασκήσεις ποδιών φορτώνουν τα οστά του ισχίου και της σπονδυλικής στήλης.`), actions: [{ type: 'template', id: 'lower' }] });
   }
 
   // 1. Συχνότητα: όλο το πρόγραμμα 1 φορά την εβδομάδα (στη διατήρηση η 1 φορά αρκεί)
@@ -359,8 +380,9 @@ export function suggest(result, programs, exById) {
   }
 
   // 3. Επιλογή ασκήσεων: περιοχές/κινήσεις που λείπουν από μύες που ήδη δουλεύονται
+  // (μόνο με στόχο τη μυϊκή ανάπτυξη: αφορούν το πώς μεγαλώνει κάθε τμήμα ενός μυός, όχι το αν διατηρείται)
   const sel = (cond, m, title, text, list, sets = 3) => {
-    if (!cond) return;
+    if (!cond || gtype !== 'bulk') return;
     const ex = list.find((id) => exById.has(id) && !used.has(id));
     out.push({ kind: 'selection', muscle: result.byId[m], title, text, actions: ex ? [{ type: 'add', ex, sets }] : [] });
   };
@@ -406,8 +428,11 @@ export function suggest(result, programs, exById) {
     out.push({
       kind: 'excess', muscle: m,
       title: T(`${m.name}: ${fmt(m.V)} sets a week`, `${m.name}: ${fmt(m.V)} σετ την εβδομάδα`),
-      text: T(`Above 20–25 sets the extra benefit is small and recovery gets harder. Remove about ${Math.ceil(m.V - RULES.max)} sets or move them to muscles that are lagging.`,
-        `Πάνω από 20–25 σετ το επιπλέον όφελος είναι μικρό και η αποκατάσταση δυσκολεύει. Αφαίρεσε περίπου ${Math.ceil(m.V - RULES.max)} σετ ή μετέφερέ τα σε μύες που υστερούν.`),
+      text: gtype === 'maintain'
+        ? T(`That is far more than maintenance needs (about ${m.min} sets). Remove about ${Math.ceil(m.V - RULES.max)} sets: with the same loads you keep the muscle.`, `Είναι πολύ περισσότερα από όσα θέλει η διατήρηση (περίπου ${m.min} σετ). Αφαίρεσε περίπου ${Math.ceil(m.V - RULES.max)} σετ: με τα ίδια φορτία κρατάς τον μυ.`)
+        : gtype === 'cut'
+          ? T(`Above 20–25 sets the extra benefit is small, and while you eat less you recover more slowly. Remove about ${Math.ceil(m.V - RULES.max)} sets or move them to muscles below their target.`, `Πάνω από 20–25 σετ το επιπλέον όφελος είναι μικρό και, όσο τρως λιγότερο, αναρρώνεις πιο αργά. Αφαίρεσε περίπου ${Math.ceil(m.V - RULES.max)} σετ ή μετέφερέ τα σε μύες κάτω από τον στόχο τους.`)
+          : T(`Above 20–25 sets the extra growth is small and recovery gets harder. Remove about ${Math.ceil(m.V - RULES.max)} sets or move them to muscles that are lagging.`, `Πάνω από 20–25 σετ η επιπλέον ανάπτυξη είναι μικρή και η αποκατάσταση δυσκολεύει. Αφαίρεσε περίπου ${Math.ceil(m.V - RULES.max)} σετ ή μετέφερέ τα σε μύες που υστερούν.`),
       actions: [],
     });
   }
@@ -415,7 +440,8 @@ export function suggest(result, programs, exById) {
     out.push({
       kind: 'excess', muscle: m,
       title: T(`${m.name}: ${fmt(m.maxS)} sets in one session`, `${m.name}: ${fmt(m.maxS)} σετ σε μία προπόνηση`),
-      text: T('After about 10 hard sets for the same muscle in one session, the returns drop. Split them over two days.', 'Μετά από ~10 σκληρά σετ για τον ίδιο μυ στην ίδια προπόνηση η απόδοση πέφτει. Μοίρασέ τα σε δύο μέρες.'),
+      text: T(`After about ${m.cap} hard sets for the same muscle in one session, the returns drop. `, `Μετά από ~${m.cap} σκληρά σετ για τον ίδιο μυ στην ίδια προπόνηση η απόδοση πέφτει. `)
+        + (gtype === 'maintain' ? T('For maintenance you can simply drop the extra sets.', 'Για διατήρηση μπορείς απλώς να κόψεις τα επιπλέον σετ.') : T('Split them over two days.', 'Μοίρασέ τα σε δύο μέρες.')),
       actions: [],
     });
   }
@@ -428,7 +454,10 @@ export function suggest(result, programs, exById) {
       out.push({
         kind: 'session',
         title: T(`“${s.program.name}”: ${s.total} sets in one session`, `«${s.program.name}»: ${s.total} σετ σε μία προπόνηση`),
-        text: T('More than 25–28 hard sets usually means a session of over 90 minutes, and quality drops toward the end. Split it into two sessions.', 'Πάνω από 25–28 σκληρά σετ η προπόνηση κρατά συνήθως πάνω από 90 λεπτά και η ποιότητα πέφτει στο τέλος. Χώρισέ την σε δύο προπονήσεις.'),
+        text: T('More than 25–28 hard sets usually means a session of over 90 minutes, and quality drops toward the end. ', 'Πάνω από 25–28 σκληρά σετ η προπόνηση κρατά συνήθως πάνω από 90 λεπτά και η ποιότητα πέφτει στο τέλος. ')
+          + (gtype === 'maintain' ? T('Maintenance needs far fewer: take a set off each exercise.', 'Η διατήρηση θέλει πολύ λιγότερα: βγάλε ένα σετ από κάθε άσκηση.')
+            : gtype === 'cut' ? T('On a diet you have less energy for the last sets: split it into two sessions so the loads hold.', 'Στη δίαιτα έχεις λιγότερη ενέργεια για τα τελευταία σετ: χώρισέ την σε δύο προπονήσεις για να κρατιούνται τα φορτία.')
+              : T('Split it into two sessions so the last sets still drive growth.', 'Χώρισέ την σε δύο προπονήσεις, ώστε και τα τελευταία σετ να δίνουν ανάπτυξη.')),
         actions: [],
       });
     }
@@ -441,8 +470,8 @@ export function suggest(result, programs, exById) {
       out.push({
         kind: 'goal',
         title: T('More training than maintenance needs', 'Περισσότερη προπόνηση από όση θέλει η διατήρηση'),
-        text: T(`${over.length} of your ${big.length} bigger muscles get at least one and a half times the sets that maintenance needs. You can keep the plan as it is, or save time: with a set less on each exercise you still keep your muscle, as long as the loads stay the same.`,
-          `${over.length} από τους ${big.length} μεγαλύτερους μύες σου παίρνουν τουλάχιστον μιάμιση φορά τα σετ που θέλει η διατήρηση. Μπορείς να κρατήσεις το πρόγραμμα όπως είναι ή να κερδίσεις χρόνο: με ένα σετ λιγότερο σε κάθε άσκηση κρατάς πάλι τους μύες σου, εφόσον τα φορτία μείνουν ίδια.`),
+        text: T(`${over.length} of your ${big.length} bigger muscles get at least one and a half times the sets that maintenance needs. You can keep the plan as it is, or save time: with a set less on each exercise you still keep your muscle, as long as the loads stay the same. For your bones, keep the heavy leg, hip and back lifts in at least two sessions a week.`,
+          `${over.length} από τους ${big.length} μεγαλύτερους μύες σου παίρνουν τουλάχιστον μιάμιση φορά τα σετ που θέλει η διατήρηση. Μπορείς να κρατήσεις το πρόγραμμα όπως είναι ή να κερδίσεις χρόνο: με ένα σετ λιγότερο σε κάθε άσκηση κρατάς πάλι τους μύες σου, εφόσον τα φορτία μείνουν ίδια. Για τα οστά σου, κράτα τις βαριές ασκήσεις ποδιών, ισχίου και πλάτης σε τουλάχιστον δύο προπονήσεις την εβδομάδα.`),
         actions: [],
       });
     }
@@ -473,7 +502,7 @@ export function suggest(result, programs, exById) {
   // 9. Σώμα και στόχοι (addons/body.js)
   if (typeof window !== 'undefined' && window.__mxBody) {
     const f = result.bodyFit;
-    const bt = window.__mxBody.tips({ sessions }, f).map((t) => {
+    const bt = window.__mxBody.tips({ sessions, bone: result.bone }, f).map((t) => {
       if (!t.stag) return t;
       // περιφέρεια που δεν μεγαλώνει: λίγος όγκος για τους μύες της → πρόσθεσε άσκηση
       const low = t.stag.muscles.map((id) => result.byId[id]).filter((m) => m && m.V < RULES.max).sort((a, b) => a.V - b.V)[0];
@@ -488,6 +517,20 @@ export function suggest(result, programs, exById) {
       if (p) bt.unshift({ kind: 'body', title: T(`${window.__mxBody.TYPE[f.type][0]}: more workouts a week`, `${window.__mxBody.TYPE[f.type][0]}: περισσότερες προπονήσεις`), text: T(`For this goal ${f.type === 'cut' ? '3 or more' : f.type === 'maintain' ? '2 or more' : '3–4'} workouts a week work best; you do ${sessions}.`, `Για αυτόν τον στόχο δουλεύουν καλύτερα ${f.type === 'cut' ? '3 ή περισσότερες' : f.type === 'maintain' ? '2 ή περισσότερες' : '3–4'} προπονήσεις την εβδομάδα· κάνεις ${sessions}.`), actions: [{ type: 'perweek', program: p.id, n: p.perWeek + 1 }] });
     }
     out.splice(Math.min(3, out.length), 0, ...bt);
+  }
+  // 10. Οστά: λιγότερες από 2 προπονήσεις την εβδομάδα με βαριές ασκήσεις για ισχίο και σπονδυλική στήλη
+  if (result.bone && result.bone.sessions < BONE_RULE.sessions) {
+    const n = result.bone.sessions;
+    const ex = ['squat', 'rdl', 'leg_press', 'db_lunge', 'deadlift', 'ohp'].find((id) => exById.has(id) && !used.has(id));
+    out.push({
+      kind: 'bone',
+      title: n ? T('Bones: only 1 session a week loads your hips and spine', 'Οστά: μόνο 1 προπόνηση την εβδομάδα φορτώνει ισχίο και σπονδυλική στήλη') : T('Bones: no session loads your hips and spine', 'Οστά: καμία προπόνηση δεν φορτώνει ισχίο και σπονδυλική στήλη'),
+      text: T('Bone holds or gets stronger only where it is loaded. Guidelines for bone health ask for resistance exercise 2–3 times a week with heavy lifts for the legs, hips and back, such as squats, deadlifts, lunges and overhead presses. ', 'Το οστό κρατιέται ή δυναμώνει μόνο εκεί που φορτώνεται. Οι οδηγίες για την υγεία των οστών ζητούν ασκήσεις με αντίσταση 2–3 φορές την εβδομάδα, με βαριές ασκήσεις για πόδια, ισχίο και πλάτη, όπως καθίσματα, άρσεις θανάτου, προβολές και πιέσεις πάνω από το κεφάλι. ')
+        + (gtype === 'cut' ? T('This matters more while you lose weight, because dieting takes a little bone too.', 'Μετράει περισσότερο όσο χάνεις βάρος, γιατί η δίαιτα παίρνει και λίγο οστό.')
+          : gtype === 'maintain' ? T('For muscle one session a week can be enough; for bone, keep these lifts in at least two.', 'Για τους μύες μπορεί να αρκεί 1 προπόνηση την εβδομάδα· για τα οστά, κράτα αυτές τις ασκήσεις σε τουλάχιστον δύο.')
+            : T('The same lifts are also the ones that build the most muscle.', 'Οι ίδιες ασκήσεις είναι και αυτές που χτίζουν τους περισσότερους μύες.')),
+      actions: ex ? [{ type: 'add', ex, sets: 3 }] : [],
+    });
   }
   return out;
 }
@@ -514,7 +557,7 @@ export function summaryText(result, programs, exById) {
   }
   if (typeof window !== 'undefined' && window.__mxProg) lines.push(...window.__mxProg.coachLines(result.overload));
   if (typeof window !== 'undefined' && window.__mxBody) {
-    const bl = window.__mxBody.coachLines({ sessions: result.weeklySessions }, result.bodyFit);
+    const bl = window.__mxBody.coachLines({ sessions: result.weeklySessions, bone: result.bone }, result.bodyFit);
     if (bl.length) lines.push('', ...bl);
   }
   return lines.join('\n');

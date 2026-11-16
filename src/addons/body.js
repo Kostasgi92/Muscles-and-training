@@ -1,7 +1,10 @@
 /* Body data and goals for the program review.
    profile = {sex: 'm'|'f'|'', age, ageOn: "YYYY-MM-DD", height (cm)}
-   entries = [{id, date: "YYYY-MM-DD", at, w (kg), fat (%), mus (% skeletal muscle), m: {neck, shoulders, chest, arm, forearm, waist, hips, thigh, calf} (cm)}]
-   goals   = {type: 'cut'|'bulk'|'maintain' (primary goal, chosen by the user; none = muscle gain), w, fat, mus, waist, date, setOn}
+   entries = [{id, date: "YYYY-MM-DD", at, w (kg), fat (%), mus (% muscle), bone (% bone), m: {neck, shoulders, chest, arm, forearm, waist, hips, thigh, calf} (cm)}]
+   goals   = {type: 'cut'|'bulk'|'maintain' (primary goal, chosen by the user; none = muscle gain), w, fat, mus, bone, waist, date, setOn}
+   Fat + muscle + bone make 100% of the body when the scale reports "muscle mass" (everything that is not fat or bone):
+   the missing one of the three is worked out, and three typed numbers that do not total 100% are refused. With
+   "skeletal muscle" (~30–50%) the three total well under 100% and are accepted as they are.
    Stored in this browser (localStorage "mx.body") and, when available, privately per user in the artifact db (doc "__body").
    window.__mxBody: computed metrics, a 0–10 "fit to goals" score for the review, suggestions, coach lines and the two tabs. */
 (() => {
@@ -32,9 +35,9 @@
   const cleanEntry = (e) => {
     const m = {};
     MKEYS.forEach((k) => { const v = num(e.m && e.m[k]); if (v) m[k] = v; });
-    return { id: String(e.id || Math.random().toString(36).slice(2, 10)), date: e.date, at: +e.at || Date.now(), w: num(e.w), fat: num(e.fat), mus: num(e.mus), m };
+    return { id: String(e.id || Math.random().toString(36).slice(2, 10)), date: e.date, at: +e.at || Date.now(), w: num(e.w), fat: num(e.fat), mus: num(e.mus), bone: num(e.bone), m };
   };
-  const hasData = (e) => e.w || e.fat || e.mus || Object.keys(e.m).length;
+  const hasData = (e) => e.w || e.fat || e.mus || e.bone || Object.keys(e.m).length;
   // ο κύριος στόχος: απώλεια λίπους, μυϊκή ανάπτυξη ή διατήρηση
   const GOAL_TYPES = ['cut', 'bulk', 'maintain'];
   const cleanAll = (d) => {
@@ -44,7 +47,7 @@
     return {
       profile: { sex: p.sex === 'm' || p.sex === 'f' ? p.sex : '', age: num(p.age), ageOn: isDate(p.ageOn) ? p.ageOn : null, height: num(p.height) },
       entries: (Array.isArray(d.entries) ? d.entries : []).filter((e) => e && isDate(e.date)).map(cleanEntry).filter(hasData),
-      goals: { type: GOAL_TYPES.includes(g.type) ? g.type : null, w: num(g.w), fat: num(g.fat), mus: num(g.mus), waist: num(g.waist), date: isDate(g.date) ? g.date : null, setOn: isDate(g.setOn) ? g.setOn : null },
+      goals: { type: GOAL_TYPES.includes(g.type) ? g.type : null, w: num(g.w), fat: num(g.fat), mus: num(g.mus), bone: num(g.bone), waist: num(g.waist), date: isDate(g.date) ? g.date : null, setOn: isDate(g.setOn) ? g.setOn : null },
     };
   };
   let data = cleanAll(null);
@@ -92,7 +95,7 @@
   const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
   const sorted = () => data.entries.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.at - b.at));
-  const getv = (e, k) => (k === 'w' || k === 'fat' || k === 'mus' ? e[k] : e.m[k]) || null;
+  const getv = (e, k) => (k === 'w' || k === 'fat' || k === 'mus' || k === 'bone' ? e[k] : e.m[k]) || null;
   // σειρά τιμών ενός μεγέθους [{date, v}] με χρονική σειρά
   const series = (k) => sorted().filter((e) => getv(e, k)).map((e) => ({ date: e.date, v: getv(e, k) }));
   const latest = (k) => { const s = series(k); return s.length ? s[s.length - 1] : null; };
@@ -118,6 +121,42 @@
     return p.ageOn ? p.age + Math.floor(days(p.ageOn, today()) / 365.25) : p.age;
   };
 
+  // ------------------------------------------------------------ σύσταση: λίπος + μύες + οστά
+  // Οι ζυγαριές που δείχνουν οστά μοιράζουν το βάρος σε λίπος, «μυϊκή μάζα» και οστά, άρα τα τρία ποσοστά κάνουν 100%.
+  // Από δύο από τα τρία βγαίνει το τρίτο (οστά ή μύες). Με «σκελετικούς μύες» το σύνολο είναι πολύ κάτω από 100
+  // (το υπόλοιπο είναι όργανα, νερό, άλλοι ιστοί) και δεν συμπληρώνεται τίποτα.
+  const BONE_RANGE = [1, 20];          // όρια για ό,τι γράφει ο χρήστης (%)
+  const BONE_REST = [1.5, 10];         // «ό,τι μένει» μετράει ως οστά μόνο αν είναι λογικό νούμερο
+  const r1 = (x) => Math.round(x * 10) / 10;
+  // → {fat, mus, bone, filled: 'bone'|'mus'|null, total, kind: 'full' (100% ± 1) | 'partial' (σκελετικοί μύες) | 'off'}
+  function compose(fat, mus, bone) {
+    const out = { fat: fat || null, mus: mus || null, bone: bone || null, filled: null, total: null, kind: null };
+    if (out.fat && out.mus && !out.bone) {
+      const r = r1(100 - out.fat - out.mus);
+      if (r >= BONE_REST[0] && r <= BONE_REST[1]) { out.bone = r; out.filled = 'bone'; }
+    } else if (out.fat && out.bone && !out.mus) {
+      const r = r1(100 - out.fat - out.bone);
+      if (r >= 10 && r <= 90) { out.mus = r; out.filled = 'mus'; }
+    }
+    if (out.fat && out.mus && out.bone) {
+      out.total = r1(out.fat + out.mus + out.bone);
+      out.kind = Math.abs(out.total - 100) <= 1 ? 'full' : out.total < 85 ? 'partial' : 'off';
+    }
+    return out;
+  }
+  // η γραμμή «σύνολο» κάτω από τα τρία πεδία (φόρμα μέτρησης και φόρμα στόχων)
+  function composeLine(c) {
+    const part = (k, name) => (c[k] ? `${name} ${nf(c[k])}%` : null);
+    const parts = [part('fat', T('fat', 'λίπος')), part('mus', T('muscle', 'μύες')), part('bone', T('bone', 'οστά'))].filter(Boolean);
+    if (parts.length < 2) return { text: T('Fat + muscle + bone make 100% of your body: type two and the third is worked out.', 'Λίπος + μύες + οστά κάνουν το 100% του σώματος: γράψε δύο και το τρίτο υπολογίζεται.'), cls: '' };
+    if (c.total == null) return { text: parts.join(' + ') + T('. Add the third to see the total.', '. Πρόσθεσε το τρίτο για να δεις το σύνολο.'), cls: '' };
+    const sum = parts.join(' + ') + ' = ' + nf(c.total) + '%';
+    const fill = c.filled === 'bone' ? T(' (bone worked out as the rest)', ' (τα οστά υπολογίστηκαν ως το υπόλοιπο)') : c.filled === 'mus' ? T(' (muscle worked out as the rest)', ' (οι μύες υπολογίστηκαν ως το υπόλοιπο)') : '';
+    if (c.kind === 'full') return { text: sum + fill, cls: 'ok' };
+    if (c.kind === 'partial') return { text: sum + T('. Your scale shows skeletal muscle only, so the rest is organs, water and other tissue.', '. Η ζυγαριά σου δείχνει μόνο τους σκελετικούς μύες, οπότε το υπόλοιπο είναι όργανα, νερό και άλλοι ιστοί.'), cls: '' };
+    return { text: sum + T('. The three should total 100%: check the numbers, or clear one and it is worked out.', '. Τα τρία πρέπει να κάνουν 100%: έλεγξε τα νούμερα ή σβήσε ένα και θα υπολογιστεί.'), cls: 'bad' };
+  }
+
   // ------------------------------------------------------------ metrics
   function navyFat(sex, h, m) {
     if (!h || !m.neck || !m.waist) return null;
@@ -130,12 +169,12 @@
   // όλα τα υπολογισμένα μεγέθη από τις πιο πρόσφατες τιμές
   function metrics(sessions = 0) {
     const p = data.profile;
-    const W = latest('w'), F = latest('fat'), M = latest('mus');
+    const W = latest('w'), F = latest('fat'), M = latest('mus'), B = latest('bone');
     const meas = {};
     MKEYS.forEach((k) => { const l = latest(k); if (l) meas[k] = l; });
     const mv = Object.fromEntries(Object.entries(meas).map(([k, l]) => [k, l.v]));
     const h = p.height, hm = h ? h / 100 : null, a = age(), w = W ? W.v : null;
-    const out = { W, F, M, meas, age: a, height: h, sex: p.sex };
+    const out = { W, F, M, B, meas, age: a, height: h, sex: p.sex };
     if (w && hm) {
       out.bmi = w / (hm * hm);
       out.bmiCat = out.bmi < 18.5 ? ['under', T('underweight', 'λιποβαρής')] : out.bmi < 25 ? ['normal', T('normal', 'φυσιολογικό')] : out.bmi < 30 ? ['over', T('overweight', 'υπέρβαρος')] : ['obese', T('obese', 'παχυσαρκία')];
@@ -145,6 +184,11 @@
     out.fat = fat; out.fatEstimated = !F && navy != null;
     if (w && fat != null) { out.fatKg = (w * fat) / 100; out.lbm = w - out.fatKg; }
     if (w && M) out.musKg = (w * M.v) / 100;
+    // οστά: η τιμή της ζυγαριάς, αλλιώς ό,τι μένει μετά το λίπος και τους μύες (boneCalc)
+    const comp = compose(F ? F.v : null, M ? M.v : null, B ? B.v : null);
+    out.bone = comp.bone; out.boneCalc = comp.filled === 'bone';
+    if (w && comp.bone) out.boneKg = (w * comp.bone) / 100;
+    out.comp = comp.total != null ? comp : null;
     if (out.lbm && hm) { out.ffmi = out.lbm / (hm * hm); out.ffmiN = out.ffmi + 6.1 * (1.8 - hm); }
     if (w && h && a) {
       const s = p.sex === 'm' ? 5 : p.sex === 'f' ? -161 : -78;
@@ -180,7 +224,7 @@
   // Τι σημαίνει ο στόχος για τους κανόνες της αξιολόγησης (review.js, progress.js):
   //  sets: στόχος σετ ανά μυ ως ποσοστό του κανόνα των 10 · freq: φορές την εβδομάδα ανά μυ
   //  hold: επιτυχία είναι να κρατάς τα φορτία (όχι να τα ανεβάζεις) · growth: οι περιφέρειες πρέπει να μεγαλώνουν
-  // Απώλεια λίπους: ίδια σετ με την ανάπτυξη (η μείωση του όγκου σε έλλειμμα κοστίζει μύες). Διατήρηση: ~⅓–⅔ του όγκου
+  // Απώλεια λίπους: ίδια σετ με την ανάπτυξη (στις μελέτες με δίαιτα, ≥10 σετ ανά μυ κράτησαν την άλιπη μάζα). Διατήρηση: ~⅓–⅔ του όγκου
   // και 1 φορά την εβδομάδα αρκούν όσο κρατιούνται τα φορτία· από τα 60 χρειάζονται περισσότερα σετ και 2 φορές.
   function rulesFor(type) {
     const older = (age() || 0) >= 60;
@@ -195,7 +239,7 @@
   function goalInfo(mt) {
     const g = data.goals;
     const w = mt.W ? mt.W.v : null;
-    const out = { set: !!(g.w || g.fat || g.mus || g.waist), g, chosen: !!g.type, type: g.type || 'bulk' };
+    const out = { set: !!(g.w || g.fat || g.mus || g.bone || g.waist), g, chosen: !!g.type, type: g.type || 'bulk' };
     const curWaist = mt.meas.waist ? mt.meas.waist.v : null;
     out.dWaist = g.waist && curWaist ? g.waist - curWaist : null;
     if (g.w && g.fat) out.fatKg = (g.w * g.fat) / 100;
@@ -205,6 +249,23 @@
     out.dFkg = out.fatKg != null && mt.fatKg != null ? out.fatKg - mt.fatKg : null;
     out.dM = g.mus && mt.M ? g.mus - mt.M.v : null;
     out.dMkg = out.musKg != null && mt.musKg != null ? out.musKg - mt.musKg : null;
+    // οστά: ο στόχος που έγραψε ο χρήστης, αλλιώς ό,τι μένει από τους στόχους λίπους και μυών
+    const gc = compose(g.fat, g.mus, g.bone);
+    out.bone = gc.bone; out.boneCalc = gc.filled === 'bone'; out.comp = gc.total != null ? gc : null;
+    if (g.w && gc.bone) out.boneKg = (g.w * gc.bone) / 100;
+    out.dBoneKg = out.boneKg != null && mt.boneKg != null ? out.boneKg - mt.boneKg : null;
+    // Τα κιλά των οστών δεν αλλάζουν αισθητά με δίαιτα ή προπόνηση (στους ενήλικες η άσκηση τα κρατά ή προσθέτει λίγα
+    // τοις εκατό). Αν οι στόχοι ζητούν αισθητά λιγότερα ή περισσότερα, προτείνουμε ποσοστά που κρατούν τα σημερινά κιλά.
+    if (out.dBoneKg != null && Math.abs(out.dBoneKg) > Math.max(0.2, 0.05 * mt.boneKg)) {
+      const keepBone = r1((100 * mt.boneKg) / g.w);
+      const keepMus = gc.kind === 'full' && g.fat ? r1(100 - g.fat - keepBone) : null;
+      const less = out.dBoneKg < 0;
+      const fix = T(`about ${nf(keepBone)}% bone${keepMus ? ` and ${nf(keepMus)}% muscle` : ''} at ${nf(g.w)} kg`, `περίπου ${nf(keepBone)}% οστά${keepMus ? ` και ${nf(keepMus)}% μύες` : ''} στα ${nf(g.w)} kg`);
+      out.boneFix = { bone: keepBone, mus: keepMus, less };
+      out.boneNote = less
+        ? T(`Your targets leave ${nf(out.boneKg)} kg for bone, ${nf(-out.dBoneKg)} kg less than now (${nf(mt.boneKg)} kg). Losing weight should not take bone with it: keeping your bone means ${fix}.`, `Οι στόχοι σου αφήνουν ${nf(out.boneKg)} kg για τα οστά, ${nf(-out.dBoneKg)} kg λιγότερα από σήμερα (${nf(mt.boneKg)} kg). Η απώλεια βάρους δεν πρέπει να παίρνει μαζί της οστά: για να τα κρατήσεις χρειάζεσαι ${fix}.`)
+        : T(`Your targets need ${nf(out.dBoneKg)} kg more bone than you have now (${nf(mt.boneKg)} kg). In adults, training keeps bone or adds a few percent at most, so plan for the same bone mass: ${fix}.`, `Οι στόχοι σου θέλουν ${nf(out.dBoneKg)} kg περισσότερα οστά από σήμερα (${nf(mt.boneKg)} kg). Στους ενήλικες η προπόνηση κρατά τα οστά ή προσθέτει το πολύ λίγα τοις εκατό, οπότε υπολόγισε τα ίδια κιλά οστών: ${fix}.`);
+    }
     // Μυϊκή ανάπτυξη: με μικρό πλεόνασμα θερμίδων ('surplus'), με σταθερό βάρος ('steady') ή χάνοντας ταυτόχρονα
     // λίπος ('lean'). Το ορίζει το βάρος-στόχος· χωρίς αυτό, το λίπος (στόχος λίπους/μέσης κάτω από το σημερινό ή
     // λίπος πάνω από το υγιές εύρος).
@@ -235,7 +296,7 @@
   }
 
   // ------------------------------------------------------------ fit of the training plan to body & goals (0–10)
-  // ctx (από review.js): {sessions, volume, overload, maxSession, groups: [{id, score}]}
+  // ctx (από review.js): {sessions, volume, overload, maxSession, groups: [{id, score}], bone: {sessions, target}}
   // Ο όγκος και η πρόοδος φορτίου έρχονται ήδη μετρημένα με τους κανόνες του στόχου (review.js, progress.js).
   function fit(ctx) {
     const mt = metrics(ctx.sessions);
@@ -260,7 +321,7 @@
     reasons.push([sess, T(`${S} ${S === 1 ? 'workout' : 'workouts'} a week`, `${S} ${S === 1 ? 'προπόνηση' : 'προπονήσεις'} την εβδομάδα`), sessWhy]);
     const vol = ctx.volume;
     const nSets = Math.round(10 * gt.sets);
-    reasons.push([vol, T('Weekly volume', 'Εβδομαδιαίος όγκος'), t === 'cut' ? T('keep the 10+ hard sets per muscle of a growth plan: cutting sets in a deficit costs muscle', 'κράτα τα 10+ σκληρά σετ ανά μυ ενός προγράμματος ανάπτυξης: η μείωση των σετ στο έλλειμμα κοστίζει μύες')
+    reasons.push([vol, T('Weekly volume', 'Εβδομαδιαίος όγκος'), t === 'cut' ? T('keep the 10+ hard sets per muscle of a growth plan: in diet studies that kept them, little or no muscle was lost', 'κράτα τα 10+ σκληρά σετ ανά μυ ενός προγράμματος ανάπτυξης: στις μελέτες με δίαιτα που τα κράτησαν χάθηκαν ελάχιστοι ή καθόλου μύες')
       : t === 'maintain' ? T(`about ${nSets} hard sets per big muscle are enough to keep it`, `περίπου ${nSets} σκληρά σετ ανά μεγάλο μυ αρκούν για να τον κρατήσεις`)
         : T('growth needs 10+ hard sets per muscle', 'η ανάπτυξη θέλει 10+ σκληρά σετ ανά μυ')]);
     const ov = ctx.overload == null ? 5 : ctx.overload;
@@ -274,6 +335,17 @@
       reasons.push([big, T('Big muscle groups (legs, back)', 'Μεγάλες μυϊκές ομάδες (πόδια, πλάτη)'), T('they burn the most energy', 'καίνε την περισσότερη ενέργεια')]);
       align = 0.3 * sess + 0.3 * vol + 0.2 * ov + 0.2 * big;
     } else align = 0.35 * sess + 0.4 * vol + 0.25 * ov;
+    // Οστά: πόσες προπονήσεις την εβδομάδα φορτώνουν ισχίο και σπονδυλική στήλη με βαριές ασκήσεις. Η θέση του ACSM για
+    // την υγεία των οστών (2004) ζητά ασκήσεις με αντίσταση 2–3 φορές την εβδομάδα· μετράει 10% στο ταίριασμα.
+    if (ctx.bone) {
+      const bs = ctx.bone.sessions, need = ctx.bone.target;
+      const bScore = bs >= need ? 10 : bs === 1 ? 6 : 2;
+      reasons.push([bScore, T('Bone loading', 'Φόρτιση οστών'), bs >= need
+        ? T(`${bs} sessions a week load your hips and spine with heavy lifts (bone guidelines: 2–3)`, `${bs} προπονήσεις την εβδομάδα φορτώνουν ισχίο και σπονδυλική στήλη με βαριές ασκήσεις (οδηγίες για τα οστά: 2–3)`)
+        : bs === 1 ? T('only 1 session a week loads your hips and spine with heavy lifts; bone guidelines ask for 2–3', 'μόνο 1 προπόνηση την εβδομάδα φορτώνει ισχίο και σπονδυλική στήλη με βαριές ασκήσεις· οι οδηγίες για τα οστά ζητούν 2–3')
+          : T('no session has heavy leg, hip or standing lifts; bone guidelines ask for 2–3 a week', 'καμία προπόνηση δεν έχει βαριές ασκήσεις ποδιών, ισχίου ή όρθιες· οι οδηγίες για τα οστά ζητούν 2–3 την εβδομάδα')]);
+      align = 0.9 * align + 0.1 * bScore;
+    }
     let ageAdj = 0;
     if (mt.age >= 45 && ctx.maxSession > 25) { ageAdj = -0.8; reasons.push([5, T(`Long sessions at ${mt.age}`, `Μεγάλες προπονήσεις στα ${mt.age}`), T('over 25 hard sets in one session makes recovery harder', 'πάνω από 25 σκληρά σετ σε μία προπόνηση δυσκολεύουν την αποκατάσταση')]); }
     // πορεία του βάρους σε σχέση με τον στόχο (από τις μετρήσεις)
@@ -330,7 +402,7 @@
     const r50 = (x) => Math.round(x / 50) * 50;
     const prot = (a, b) => T(`Protein ${Math.round(w * a)}–${Math.round(w * b)} g a day`, `Πρωτεΐνη ${Math.round(w * a)}–${Math.round(w * b)} g την ημέρα`);
     const sleep = T(' and 7–9 hours of sleep.', ' και 7–9 ώρες ύπνος.');
-    if (t === 'cut' && w) out.push({ kind: 'body', title: T('Fat loss: how to eat and move', 'Απώλεια λίπους: διατροφή και κίνηση'), text: (kcal ? T(`About ${r50(kcal - 450)} kcal a day (≈450 below your estimated ${r50(kcal)} kcal maintenance). `, `Περίπου ${r50(kcal - 450)} kcal την ημέρα (≈450 κάτω από τις ~${r50(kcal)} kcal συντήρησης). `) : '') + prot(2, 2.4) + T(', keep lifting heavy, 8,000–10,000 steps and 1–3 short cardio sessions a week.', ', συνέχισε τα βαριά σετ, 8.000–10.000 βήματα και 1–3 σύντομες αερόβιες προπονήσεις την εβδομάδα.'), actions: [] });
+    if (t === 'cut' && w) out.push({ kind: 'body', title: T('Fat loss: how to eat and move', 'Απώλεια λίπους: διατροφή και κίνηση'), text: (kcal ? T(`About ${r50(kcal - 450)} kcal a day (≈450 below your estimated ${r50(kcal)} kcal maintenance). `, `Περίπου ${r50(kcal - 450)} kcal την ημέρα (≈450 κάτω από τις ~${r50(kcal)} kcal συντήρησης). `) : '') + prot(2, 2.4) + T(', keep lifting heavy, and add at least 150 minutes of moderate activity a week, such as brisk walking.', ', συνέχισε τα βαριά σετ και πρόσθεσε τουλάχιστον 150 λεπτά μέτριας δραστηριότητας την εβδομάδα, όπως γρήγορο περπάτημα.'), actions: [] });
     if (t === 'maintain' && w) out.push({ kind: 'body', title: T('Maintenance: how to eat', 'Διατήρηση: διατροφή'), text: (kcal ? T(`About ${r50(kcal)} kcal a day (your estimated maintenance). `, `Περίπου ${r50(kcal)} kcal την ημέρα (η εκτιμώμενη συντήρησή σου). `) : '') + prot(1.4, 2) + sleep, actions: [] });
     if (t === 'bulk' && w) {
       if (mode === 'lean') out.push({ kind: 'body', title: T('Muscle gain while losing fat: how to eat', 'Μυϊκή ανάπτυξη με απώλεια λίπους: διατροφή'), text: (kcal ? T(`About ${r50(kcal - 250)}–${r50(kcal)} kcal a day (your estimated maintenance or up to ≈250 below). `, `Περίπου ${r50(kcal - 250)}–${r50(kcal)} kcal την ημέρα (η εκτιμώμενη συντήρησή σου ή έως ≈250 κάτω). `) : '') + T(`A bigger deficit slows muscle growth: lose at most ${nf(w * 0.005)} kg a week. `, `Μεγαλύτερο έλλειμμα φρενάρει την ανάπτυξη: χάνε το πολύ ${nf(w * 0.005)} kg την εβδομάδα. `) + prot(2, 2.4) + sleep, actions: [] });
@@ -348,6 +420,19 @@
         : mode === 'lean' ? T('Your plan already brings it down: keep the calorie deficit mild and move more every day.', 'Το πλάνο σου ήδη το κατεβάζει: κράτα μικρό το θερμιδικό έλλειμμα και κινήσου περισσότερο κάθε μέρα.')
         : mode === 'surplus' ? T('Gaining weight will push it up: consider building muscle at a stable weight, or losing some fat first.', 'Αν πάρεις βάρος θα ανέβει: σκέψου να χτίσεις μύες με σταθερό βάρος ή να χάσεις πρώτα λίγο λίπος.')
           : T('A mild calorie deficit and more daily movement bring it down.', 'Ένα μικρό θερμιδικό έλλειμμα και περισσότερη καθημερινή κίνηση το κατεβάζουν.')), actions: [] });
+    // Οστά. Η απώλεια βάρους παίρνει και λίγη οστική πυκνότητα στο ισχίο (μετα-ανάλυση Zibellini 2015)· η άσκηση
+    // τη μειώνει (Shah 2011). Ασβέστιο και βιταμίνη D: συνιστώμενες προσλήψεις IOM 2011.
+    const older = mt.age || 0, female = data.profile.sex === 'f';
+    if ((t === 'cut' || mode === 'lean') && w) {
+      const ca = (female && older >= 51) || older >= 71 ? '1,200' : '1,000';
+      const vd = older >= 71 ? T('20 µg (800 IU)', '20 µg (800 IU)') : T('15 µg (600 IU)', '15 µg (600 IU)');
+      out.push({ kind: 'body', title: T('Bones: protect them while you lose weight', 'Οστά: προστάτεψέ τα όσο χάνεις βάρος'), text:
+        T(`Losing weight also takes a little bone density, mostly at the hip (roughly 1% over 6–24 months in diet studies). Training limits it: in a trial of older adults on a diet, those who also exercised lost less than half as much hip bone. Keep the heavy leg, hip and standing lifts in your plan, lose no more than ${t === 'cut' ? '1%' : '0.5%'} of your weight a week, and get about ${ca} mg of calcium and ${vd} of vitamin D a day, from food where you can.`,
+          `Η απώλεια βάρους παίρνει και λίγη οστική πυκνότητα, κυρίως στο ισχίο (περίπου 1% σε 6–24 μήνες στις μελέτες με δίαιτα). Η προπόνηση τη μειώνει: σε μελέτη με μεγαλύτερους ενήλικες σε δίαιτα, όσοι γυμνάζονταν έχασαν λιγότερο από το μισό οστό στο ισχίο. Κράτα τις βαριές ασκήσεις ποδιών, ισχίου και τις όρθιες, χάνε το πολύ ${t === 'cut' ? '1%' : '0,5%'} του βάρους σου την εβδομάδα και πάρε περίπου ${ca.replace(',', '.')} mg ασβέστιο και ${vd} βιταμίνη D την ημέρα, όσο γίνεται από το φαγητό.`), actions: [] });
+    }
+    if (gi.boneNote) out.push({ kind: 'body', title: gi.boneFix.less ? T('Your targets leave less room for bone', 'Οι στόχοι σου αφήνουν λιγότερο χώρο για τα οστά') : T('Your targets need more bone than you have', 'Οι στόχοι σου θέλουν περισσότερα οστά από όσα έχεις'), text: gi.boneNote, actions: [{ type: 'tab', id: 'goals' }] });
+    if (female && older >= 65) out.push({ kind: 'body', title: T('Bones: a density scan is recommended at your age', 'Οστά: στην ηλικία σου συνιστάται μέτρηση οστικής πυκνότητας'), text: T('Screening for osteoporosis with a bone density scan (DXA) is recommended for women from 65. A home scale cannot show how dense your bones are.', 'Ο έλεγχος για οστεοπόρωση με μέτρηση οστικής πυκνότητας (DXA) συνιστάται για τις γυναίκες από τα 65. Η ζυγαριά του σπιτιού δεν δείχνει πόσο πυκνά είναι τα οστά σου.'), actions: [] });
+    else if (female && older >= 50) out.push({ kind: 'body', title: T('Bones after menopause', 'Οστά μετά την εμμηνόπαυση'), text: T('Bone loss speeds up after menopause. If you have risk factors (a parent who broke a hip, smoking, heavy drinking, low body weight), ask your doctor whether a bone density scan (DXA) makes sense for you.', 'Η απώλεια οστού επιταχύνεται μετά την εμμηνόπαυση. Αν έχεις παράγοντες κινδύνου (γονιό με κάταγμα ισχίου, κάπνισμα, πολύ αλκοόλ, χαμηλό σωματικό βάρος), ρώτησε τον γιατρό σου αν χρειάζεσαι μέτρηση οστικής πυκνότητας (DXA).'), actions: [] });
     if (mt.age >= 40) out.push({ kind: 'body', title: T(`At ${mt.age}: recovery and joints`, `Στα ${mt.age}: αποκατάσταση και αρθρώσεις`), text: T('Warm up 5–10 minutes with lighter sets, leave ~48 hours before training the same muscle hard again, and keep loading the legs: leg strength protects bones and balance with age.', 'Ζέσταμα 5–10 λεπτά με ελαφρύτερα σετ, ~48 ώρες πριν δουλέψεις ξανά έντονα τον ίδιο μυ και συνέχισε να φορτώνεις τα πόδια: η δύναμη των ποδιών προστατεύει τα οστά και την ισορροπία με τα χρόνια.'), actions: [] });
     if (t === 'bulk') stagnant().forEach((s) => out.push({ kind: 'body', stag: s, title: T(`${s.name}: no growth in ${Math.round(days(s.from.date, s.to.date) / 7)} weeks`, `${s.name}: χωρίς αύξηση εδώ και ${Math.round(days(s.from.date, s.to.date) / 7)} εβδομάδες`), text: T(`${nf(s.from.v)} → ${nf(s.to.v)} cm.`, `${nf(s.from.v)} → ${nf(s.to.v)} cm.`), actions: [] }));
     return out;
@@ -359,15 +444,17 @@
     const l = [T('Body data:', 'Στοιχεία σώματος:')];
     const p = data.profile;
     l.push([p.sex ? (p.sex === 'm' ? T('man', 'άνδρας') : T('woman', 'γυναίκα')) : null, mt.age ? T(`${mt.age} years`, `${mt.age} ετών`) : null, p.height ? `${p.height} cm` : null].filter(Boolean).join(', '));
-    if (mt.W) l.push(T(`Weight ${nf(mt.W.v)} kg (${mt.W.date})`, `Βάρος ${nf(mt.W.v)} kg (${mt.W.date})`) + (mt.bmi ? `, BMI ${nf(mt.bmi)}` : '') + (mt.fat != null ? T(`, body fat ${nf(mt.fat)}%`, `, λίπος ${nf(mt.fat)}%`) + (mt.fatEstimated ? T(' (estimated)', ' (εκτίμηση)') : '') : '') + (mt.M ? T(`, muscle ${nf(mt.M.v)}%`, `, μύες ${nf(mt.M.v)}%`) : '') + (mt.bmr ? `, BMR ${Math.round(mt.bmr)} kcal` : ''));
+    if (mt.W) l.push(T(`Weight ${nf(mt.W.v)} kg (${mt.W.date})`, `Βάρος ${nf(mt.W.v)} kg (${mt.W.date})`) + (mt.bmi ? `, BMI ${nf(mt.bmi)}` : '') + (mt.fat != null ? T(`, body fat ${nf(mt.fat)}%`, `, λίπος ${nf(mt.fat)}%`) + (mt.fatEstimated ? T(' (estimated)', ' (εκτίμηση)') : '') : '') + (mt.M ? T(`, muscle ${nf(mt.M.v)}%`, `, μύες ${nf(mt.M.v)}%`) : '') + (mt.bone ? T(`, bone ${nf(mt.bone)}%`, `, οστά ${nf(mt.bone)}%`) + (mt.boneKg ? ` (${nf(mt.boneKg)} kg, ` : ' (') + (mt.boneCalc ? T('worked out as the rest', 'υπολογισμός ως υπόλοιπο') : T('home-scale estimate', 'εκτίμηση οικιακής ζυγαριάς')) + ')' : '') + (mt.bmr ? `, BMR ${Math.round(mt.bmr)} kcal` : ''));
     const ms = MEAS.filter(([k]) => mt.meas[k]).map(([k, n]) => `${n} ${nf(mt.meas[k].v)}`);
     if (ms.length) l.push(T('Measurements (cm): ', 'Μετρήσεις (cm): ') + ms.join(', '));
-    ['w', 'fat', 'mus', 'waist', 'arm'].forEach((k) => { const r = rate(k); if (r) l.push(`${k}: ${sgn(r.perWeek, 2)}/${T('week', 'εβδ.')} (${nf(r.weeks)} ${T('weeks', 'εβδ.')})`); });
+    if (ctx.bone) l.push(T(`Sessions a week with heavy lifts that load the hips and spine: ${ctx.bone.sessions} (bone-health guideline: 2–3).`, `Προπονήσεις την εβδομάδα με βαριές ασκήσεις που φορτώνουν ισχίο και σπονδυλική στήλη: ${ctx.bone.sessions} (οδηγία για την υγεία των οστών: 2–3).`));
+    ['w', 'fat', 'mus', 'bone', 'waist', 'arm'].forEach((k) => { const r = rate(k); if (r) l.push(`${k}: ${sgn(r.perWeek, 2)}/${T('week', 'εβδ.')} (${nf(r.weeks)} ${T('weeks', 'εβδ.')})`); });
     const g = data.goals;
-    if (g.w || g.fat || g.mus || g.waist) l.push(T('Targets: ', 'Αριθμητικοί στόχοι: ') + [g.w ? T(`weight ${nf(g.w)} kg`, `βάρος ${nf(g.w)} kg`) : null, g.fat ? T(`body fat ${nf(g.fat)}%`, `λίπος ${nf(g.fat)}%`) : null, g.mus ? T(`muscle ${nf(g.mus)}%`, `μύες ${nf(g.mus)}%`) : null, g.waist ? T(`waist ${nf(g.waist)} cm`, `μέση ${nf(g.waist)} cm`) : null, g.date ? T(`by ${g.date}`, `έως ${g.date}`) : null].filter(Boolean).join(', '));
+    if (g.w || g.fat || g.mus || g.bone || g.waist) l.push(T('Targets: ', 'Αριθμητικοί στόχοι: ') + [g.w ? T(`weight ${nf(g.w)} kg`, `βάρος ${nf(g.w)} kg`) : null, g.fat ? T(`body fat ${nf(g.fat)}%`, `λίπος ${nf(g.fat)}%`) : null, g.mus ? T(`muscle ${nf(g.mus)}%`, `μύες ${nf(g.mus)}%`) : null, g.bone ? T(`bone ${nf(g.bone)}%`, `οστά ${nf(g.bone)}%`) : null, g.waist ? T(`waist ${nf(g.waist)} cm`, `μέση ${nf(g.waist)} cm`) : null, g.date ? T(`by ${g.date}`, `έως ${g.date}`) : null].filter(Boolean).join(', '));
     if (f) {
       if (f.gi.modeWhy) l.push(f.gi.modeWhy);
       if (f.gi.clash) l.push(f.gi.clash);
+      if (f.gi.boneNote) l.push(f.gi.boneNote);
       l.push(T(`Fit of the plan to the goal: ${nf(f.score)}/10`, `Ταίριασμα του προγράμματος με τον στόχο: ${nf(f.score)}/10`));
     }
     return l;
@@ -408,6 +495,7 @@
   // έλεγχος ενός πεδίου: κενό = εντάξει, αλλιώς αριθμός μέσα στα όρια
   const badNum = (raw, lo, hi) => String(raw ?? '').trim() !== '' && !(num(raw) >= lo && num(raw) <= hi);
   const MUS_HINT = T('as your scale shows it: skeletal muscle (~30–45%) or muscle mass (~70–80%)', 'όπως τη δείχνει η ζυγαριά: σκελετικοί μύες (~30–45%) ή μυϊκή μάζα (~70–80%)');
+  const BONE_HINT = T('if your scale shows kilos: kilos ÷ weight × 100', 'αν η ζυγαριά δείχνει κιλά: κιλά ÷ βάρος × 100');
   const card = (label, value, sub, cls) => h('div', { class: 'bd-card' + (cls ? ' ' + cls : '') }, h('span', { class: 'bd-l', text: label }), h('b', { text: value }), sub ? h('small', { text: sub }) : null);
 
   // τι ελέγχει η αξιολόγηση με κάθε στόχο
@@ -421,7 +509,7 @@
 
   // πρόχειρα που επιβιώνουν από τα re-render της αξιολόγησης
   const draft = { profile: null, entry: null, goals: null, msg: '', gmsg: '', pmsg: '', tmsg: '', showMeas: false };
-  const blankEntry = () => ({ date: today(), w: '', fat: '', mus: '', m: {} });
+  const blankEntry = () => ({ date: today(), w: '', fat: '', mus: '', bone: '', m: {} });
 
   function mountTab(host, ctx) {
     if (!host) return;
@@ -453,7 +541,7 @@
     host.appendChild(prof);
 
     // --- σημερινή εικόνα
-    if (mt.W || mt.fat != null || Object.keys(mt.meas).length) {
+    if (mt.W || mt.fat != null || mt.M || mt.bone || Object.keys(mt.meas).length) {
       const cards = h('div', { class: 'bd-cards' });
       const dsub = (l) => (l ? fmtDate(l.date) : '');
       if (mt.W) cards.appendChild(card(T('Weight', 'Βάρος'), nf(mt.W.v) + ' kg', dsub(mt.W)));
@@ -462,14 +550,29 @@
       if (mt.tdee) cards.appendChild(card(T('Maintenance', 'Συντήρηση'), '~' + Math.round(mt.tdee / 10) * 10 + ' kcal', mt.activity));
       if (mt.fat != null) cards.appendChild(card(T('Body fat', 'Λίπος'), nf(mt.fat) + '%' + (mt.fatKg ? ' · ' + nf(mt.fatKg) + ' kg' : ''), (mt.fatEstimated ? T('estimate from measurements (US Navy) · ', 'εκτίμηση από περιφέρειες (US Navy) · ') : dsub(mt.F) + ' · ') + mt.fatCat[1], 'c-' + mt.fatCat[0]));
       if (mt.M) cards.appendChild(card(T('Muscle', 'Μύες'), nf(mt.M.v) + '%' + (mt.musKg ? ' · ' + nf(mt.musKg) + ' kg' : ''), dsub(mt.M)));
+      if (mt.bone) cards.appendChild(card(T('Bone', 'Οστά'), nf(mt.bone) + '%' + (mt.boneKg ? ' · ' + nf(mt.boneKg) + ' kg' : ''), mt.boneCalc ? T('worked out: the rest after fat and muscle', 'υπολογισμός: ό,τι μένει μετά το λίπος και τους μύες') : dsub(mt.B) + T(' · estimate', ' · εκτίμηση')));
       if (mt.lbm) cards.appendChild(card(T('Lean mass', 'Άλιπη μάζα'), nf(mt.lbm) + ' kg', mt.ffmiN ? 'FFMI ' + nf(mt.ffmiN) : ''));
       if (mt.whr) cards.appendChild(card(T('Waist / hips', 'Μέση / λεκάνη'), nf(mt.whr, 2), mt.whrRisk ? T('above the healthy limit', 'πάνω από το υγιές όριο') : T('healthy', 'υγιές'), mt.whrRisk ? 'c-warn' : 'c-ok'));
       if (mt.whtr) cards.appendChild(card(T('Waist / height', 'Μέση / ύψος'), nf(mt.whtr, 2), mt.whtrCat[1], 'c-' + mt.whtrCat[0]));
       host.appendChild(h('h3', { class: 'bd-h2', text: T('Now', 'Σήμερα') }));
       host.appendChild(cards);
       if (!data.profile.height || !mt.age || !data.profile.sex) host.appendChild(h('p', { class: 'bd-hint', text: T('Add your sex, age and height above for BMI, BMR and the healthy ranges.', 'Συμπλήρωσε φύλο, ηλικία και ύψος παραπάνω για BMI, BMR και τα υγιή όρια.') }));
+      // σύσταση: λίπος + μύες + οστά = 100% (λεπτή μπάρα πάνω από τη λίστα με τα νούμερα)
+      if (mt.comp && mt.comp.kind !== 'off') {
+        const c = mt.comp, wkg = mt.W ? mt.W.v : null;
+        const other = c.kind === 'partial' ? r1(100 - c.total) : 0;
+        const parts = [['fat', T('Fat', 'Λίπος'), c.fat], ['mus', T('Muscle', 'Μύες'), c.mus], ['bone', T('Bone', 'Οστά'), c.bone]];
+        if (other > 0) parts.push(['other', T('Other (organs, water…)', 'Άλλα (όργανα, νερό…)'), other]);
+        host.appendChild(h('h3', { class: 'bd-h2', text: T('Body composition', 'Σύσταση σώματος') }));
+        host.appendChild(h('div', { class: 'bd-comp' },
+          h('div', { class: 'bd-seg', role: 'img', 'aria-label': parts.map(([, n, v]) => `${n} ${nf(v)}%`).join(', ') }, parts.map(([k, n, v]) => h('i', { class: 'k-' + k, style: `flex:${v} 1 0`, title: `${n} ${nf(v)}%` }))),
+          h('ul', { class: 'bd-legend' }, parts.map(([k, n, v]) => h('li', {}, h('i', { class: 'k-' + k }), h('span', { text: n }), h('b', { text: nf(v) + '%' }), h('small', { text: wkg ? nf((wkg * v) / 100) + ' kg' : '' })))),
+          h('p', { class: 'bd-hint', text: (c.kind === 'full' ? T('Fat + muscle + bone = 100% of your body weight.', 'Λίπος + μύες + οστά = 100% του βάρους σου.') : T('Your scale shows skeletal muscle only, so fat, muscle and bone do not reach 100%.', 'Η ζυγαριά σου δείχνει μόνο τους σκελετικούς μύες, οπότε λίπος, μύες και οστά δεν φτάνουν το 100%.'))
+            + (mt.boneCalc ? T(' Bone is worked out as what is left after fat and muscle; add your scale’s number in a new measurement to replace it.', ' Τα οστά υπολογίζονται ως ό,τι μένει μετά το λίπος και τους μύες· πρόσθεσε το νούμερο της ζυγαριάς σε νέα μέτρηση για να το αντικαταστήσεις.') : '') }),
+          h('p', { class: 'bd-hint', text: T('Home scales estimate bone from your weight and lean mass. They do not measure how dense or strong your bones are: only a bone density scan (DXA) does.', 'Οι οικιακές ζυγαριές εκτιμούν τα οστά από το βάρος και την άλιπη μάζα σου. Δεν μετρούν πόσο πυκνά ή γερά είναι: αυτό το δείχνει μόνο η μέτρηση οστικής πυκνότητας (DXA).') })));
+      }
       // μεταβολές
-      const rows = [['w', T('Weight', 'Βάρος'), 'kg'], ['fat', T('Body fat', 'Λίπος'), '%'], ['mus', T('Muscle', 'Μύες'), '%']].concat(MEAS.map(([k, n]) => [k, n, 'cm']))
+      const rows = [['w', T('Weight', 'Βάρος'), 'kg'], ['fat', T('Body fat', 'Λίπος'), '%'], ['mus', T('Muscle', 'Μύες'), '%'], ['bone', T('Bone', 'Οστά'), '%']].concat(MEAS.map(([k, n]) => [k, n, 'cm']))
         .map(([k, n, u]) => { const s = series(k); if (!s.length) return null; const last = s[s.length - 1], prev = s[s.length - 2], first = s[0];
           return h('tr', {}, h('th', { scope: 'row', text: n }), h('td', { text: nf(last.v) + ' ' + u }),
             h('td', { class: 'chg', text: prev ? sgn(last.v - prev.v) : '–' }), h('td', { class: 'chg', text: s.length > 1 ? sgn(last.v - first.v) : '–' })); }).filter(Boolean);
@@ -484,17 +587,35 @@
       h('summary', { text: T('Measurements (cm)', 'Περιφέρειες (cm)') }),
       h('div', { class: 'bd-grid3' }, MEAS.map(([k, n, hint]) => field(n, numInput(en.m[k], (v) => { en.m[k] = v; }, { step: '0.1' }), hint))));
     if (draft.showMeas) measBox.open = true;
+    // λίπος + μύες + οστά: ζωντανό σύνολο, και το τρίτο που λείπει φαίνεται στο πεδίο του πριν αποθηκευτεί
+    const cin = {};
+    const totalP = h('p', { class: 'bd-total bd-wide' });
+    const showTotal = () => {
+      const c = compose(num(en.fat), num(en.mus), num(en.bone));
+      const l = composeLine(c);
+      totalP.textContent = l.text;
+      totalP.className = 'bd-total bd-wide' + (l.cls ? ' ' + l.cls : '');
+      cin.bone.placeholder = c.filled === 'bone' ? shown(c.bone) : '';
+      cin.mus.placeholder = c.filled === 'mus' ? shown(c.mus) : '';
+    };
+    cin.fat = numInput(en.fat, (v) => { en.fat = v; showTotal(); }, { step: '0.1' });
+    cin.mus = numInput(en.mus, (v) => { en.mus = v; showTotal(); }, { step: '0.1' });
+    cin.bone = numInput(en.bone, (v) => { en.bone = v; showTotal(); }, { step: '0.1' });
+    showTotal();
     const form = h('form', { class: 'bd-box', novalidate: true, onsubmit: (e) => {
       e.preventDefault();
       if (!isDate(en.date) || en.date > today()) { draft.msg = T('Choose a date that is not in the future.', 'Διάλεξε ημερομηνία που δεν είναι στο μέλλον.'); return rerender(); }
-      const c = cleanEntry({ date: en.date, w: en.w, fat: en.fat, mus: en.mus, m: en.m });
+      const c0 = compose(num(en.fat), num(en.mus), num(en.bone));
+      const c = cleanEntry({ date: en.date, w: en.w, fat: en.fat, mus: c0.filled === 'mus' ? c0.mus : en.mus, bone: c0.filled === 'bone' ? c0.bone : en.bone, m: en.m });
       if (!hasData(c)) { draft.msg = T('Fill in at least one value.', 'Συμπλήρωσε τουλάχιστον μία τιμή.'); return rerender(); }
       const errs = [];
       if (badNum(en.w, 25, 300)) errs.push(T('weight 25–300 kg', 'βάρος 25–300 kg'));
       if (badNum(en.fat, 3, 70)) errs.push(T('body fat 3–70%', 'λίπος 3–70%'));
       if (badNum(en.mus, 10, 90)) errs.push(T('muscle 10–90%', 'μύες 10–90%'));
+      if (badNum(en.bone, BONE_RANGE[0], BONE_RANGE[1])) errs.push(T(`bone ${BONE_RANGE[0]}–${BONE_RANGE[1]}%`, `οστά ${BONE_RANGE[0]}–${BONE_RANGE[1]}%`));
       MKEYS.forEach((k) => { if (badNum(en.m[k], 10, 250)) errs.push(MEAS.find((x) => x[0] === k)[1] + ' 10–250 cm'); });
       if (errs.length) { draft.msg = T('Check: ', 'Έλεγξε: ') + errs.join(', ') + '.'; return rerender(); }
+      if (c0.kind === 'off') { draft.msg = composeLine(c0).text; return rerender(); }
       data.entries.push(c);
       draft.entry = blankEntry(); draft.msg = T('Measurement saved.', 'Η μέτρηση αποθηκεύτηκε.'); draft.showMeas = false;
       persist();
@@ -502,9 +623,11 @@
       h('h3', { class: 'bd-h', text: T('New measurement', 'Νέα μέτρηση') }),
       h('div', { class: 'bd-grid3' },
         field(T('Date', 'Ημερομηνία'), h('input', { type: 'date', value: en.date, max: today(), oninput: (e) => { en.date = e.target.value; } }), null, 'bd-wide'),
-        field(T('Weight (kg)', 'Βάρος (kg)'), numInput(en.w, (v) => { en.w = v; }, { step: '0.1' })),
-        field(T('Body fat (%)', 'Λίπος (%)'), numInput(en.fat, (v) => { en.fat = v; }, { step: '0.1' })),
-        field(T('Muscle (%)', 'Μύες (%)'), numInput(en.mus, (v) => { en.mus = v; }, { step: '0.1' }), MUS_HINT)),
+        field(T('Weight (kg)', 'Βάρος (kg)'), numInput(en.w, (v) => { en.w = v; }, { step: '0.1' }), null, 'bd-wide'),
+        field(T('Body fat (%)', 'Λίπος (%)'), cin.fat),
+        field(T('Muscle (%)', 'Μύες (%)'), cin.mus, MUS_HINT),
+        field(T('Bone (%)', 'Οστά (%)'), cin.bone, BONE_HINT),
+        totalP),
       measBox,
       h('button', { class: 'btn primary', type: 'submit', text: T('Save measurement', 'Αποθήκευση μέτρησης') }),
       draft.msg ? h('p', { class: 'bd-msg', role: 'status', text: draft.msg }) : null,
@@ -517,7 +640,7 @@
     if (list.length) {
       host.appendChild(h('h3', { class: 'bd-h2', text: T('History', 'Ιστορικό') }));
       host.appendChild(h('ul', { class: 'bd-hist' }, list.map((e) => {
-        const parts = [e.w ? nf(e.w) + ' kg' : null, e.fat ? T('fat ', 'λίπος ') + nf(e.fat) + '%' : null, e.mus ? T('muscle ', 'μύες ') + nf(e.mus) + '%' : null]
+        const parts = [e.w ? nf(e.w) + ' kg' : null, e.fat ? T('fat ', 'λίπος ') + nf(e.fat) + '%' : null, e.mus ? T('muscle ', 'μύες ') + nf(e.mus) + '%' : null, e.bone ? T('bone ', 'οστά ') + nf(e.bone) + '%' : null]
           .concat(MEAS.filter(([k]) => e.m[k]).map(([k, n]) => n + ' ' + nf(e.m[k])));
         return h('li', {}, h('span', { class: 'd', text: fmtDate(e.date) }), h('span', { class: 'v', text: parts.filter(Boolean).join(' · ') }),
           h('button', { type: 'button', 'aria-label': T('Delete this measurement', 'Διαγραφή μέτρησης'), text: '×', onclick: () => { data.entries = data.entries.filter((x) => x.id !== e.id); persist(); } }));
@@ -552,32 +675,50 @@
       draft.tmsg ? h('p', { class: 'bd-msg', role: 'status', text: draft.tmsg })
         : !gt.chosen ? h('p', { class: 'bd-hint', text: T('Not chosen yet: until you choose, the review assumes muscle gain.', 'Δεν έχεις διαλέξει ακόμα: μέχρι τότε η αξιολόγηση θεωρεί ότι θέλεις μυϊκή ανάπτυξη.') }) : null));
     draft.tmsg = '';
-    const g = draft.goals || (draft.goals = { w: data.goals.w ?? '', fat: data.goals.fat ?? '', mus: data.goals.mus ?? '', waist: data.goals.waist ?? '', fatKg: '', musKg: '', date: data.goals.date ?? '' });
+    const g = draft.goals || (draft.goals = { w: data.goals.w ?? '', fat: data.goals.fat ?? '', mus: data.goals.mus ?? '', bone: data.goals.bone ?? '', waist: data.goals.waist ?? '', fatKg: '', musKg: '', boneKg: '', date: data.goals.date ?? '' });
+    const PCT = ['fat', 'mus', 'bone'];
     const syncKg = () => {
       const w = num(g.w);
-      if (w && num(g.fat)) g.fatKg = shown(Math.round(w * num(g.fat)) / 100);
-      if (w && num(g.mus)) g.musKg = shown(Math.round(w * num(g.mus)) / 100);
+      PCT.forEach((k) => { if (w && num(g[k])) g[k + 'Kg'] = shown(Math.round(w * num(g[k])) / 100); else if (g[k] === '') g[k + 'Kg'] = ''; });
     };
-    if (g.fatKg === '' && g.musKg === '') syncKg();
+    if (g.fatKg === '' && g.musKg === '' && g.boneKg === '') syncKg();
     const inputs = {};
-    const upd = () => { ['fatKg', 'musKg', 'fat', 'mus'].forEach((k) => { if (inputs[k] && document.activeElement !== inputs[k]) inputs[k].value = g[k]; }); };
+    // λίπος + μύες + οστά = 100%: ζωντανό σύνολο· το ποσοστό που λείπει φαίνεται στο πεδίο του και αποθηκεύεται μαζί
+    const gTotal = h('p', { class: 'bd-total bd-wide' });
+    const upd = () => {
+      ['fatKg', 'musKg', 'boneKg', 'fat', 'mus', 'bone'].forEach((k) => { if (inputs[k] && document.activeElement !== inputs[k]) inputs[k].value = g[k]; });
+      const c = compose(num(g.fat), num(g.mus), num(g.bone));
+      const l = composeLine(c);
+      gTotal.textContent = l.text;
+      gTotal.className = 'bd-total bd-wide' + (l.cls ? ' ' + l.cls : '');
+      const w = num(g.w);
+      [['bone', 'boneKg'], ['mus', 'musKg']].forEach(([k, kk]) => {
+        const on = c.filled === k;
+        if (inputs[k]) inputs[k].placeholder = on ? shown(c[k]) : '';
+        if (inputs[kk]) inputs[kk].placeholder = on && w ? shown(Math.round(w * c[k]) / 100) : '';
+      });
+    };
+    const pct = (k) => numInput(g[k], (v) => { g[k] = v; syncKg(); upd(); }, { step: '0.1' });
+    const kg = (k) => numInput(g[k + 'Kg'], (v) => { g[k + 'Kg'] = v; const w = num(g.w); if (w && num(v)) g[k] = shown(Math.round((1000 * num(v)) / w) / 10); else if (v === '') g[k] = ''; upd(); }, { step: '0.1' });
     inputs.w = numInput(g.w, (v) => { g.w = v; syncKg(); upd(); }, { step: '0.1' });
-    inputs.fat = numInput(g.fat, (v) => { g.fat = v; syncKg(); upd(); }, { step: '0.1' });
-    inputs.fatKg = numInput(g.fatKg, (v) => { g.fatKg = v; const w = num(g.w); if (w && num(v)) g.fat = shown(Math.round((1000 * num(v)) / w) / 10); upd(); }, { step: '0.1' });
-    inputs.mus = numInput(g.mus, (v) => { g.mus = v; syncKg(); upd(); }, { step: '0.1' });
-    inputs.musKg = numInput(g.musKg, (v) => { g.musKg = v; const w = num(g.w); if (w && num(v)) g.mus = shown(Math.round((1000 * num(v)) / w) / 10); upd(); }, { step: '0.1' });
+    PCT.forEach((k) => { inputs[k] = pct(k); inputs[k + 'Kg'] = kg(k); });
+    upd();
     const now = (v, u) => (v != null ? T('now ', 'τώρα ') + nf(v) + u : null);
     const form = h('form', { class: 'bd-box', novalidate: true, onsubmit: (e) => {
       e.preventDefault();
-      const w = num(g.w), fat = num(g.fat), mus = num(g.mus);
+      const w = num(g.w);
+      const c0 = compose(num(g.fat), num(g.mus), num(g.bone));
+      const fat = c0.fat, mus = c0.mus, bone = c0.bone;
       const errs = [];
       if (badNum(g.w, 25, 300)) errs.push(T('target weight 25–300 kg', 'βάρος-στόχος 25–300 kg'));
       if (badNum(g.fat, 3, 70)) errs.push(T('body fat 3–70%', 'λίπος 3–70%'));
       if (badNum(g.mus, 10, 90)) errs.push(T('muscle 10–90%', 'μύες 10–90%'));
+      if (badNum(g.bone, BONE_RANGE[0], BONE_RANGE[1])) errs.push(T(`bone ${BONE_RANGE[0]}–${BONE_RANGE[1]}%`, `οστά ${BONE_RANGE[0]}–${BONE_RANGE[1]}%`));
       if (badNum(g.waist, 40, 200)) errs.push(T('waist 40–200 cm', 'μέση 40–200 cm'));
       if (errs.length) { draft.gmsg = T('Check: ', 'Έλεγξε: ') + errs.join(', ') + '.'; return rerender(); }
+      if (c0.kind === 'off') { draft.gmsg = composeLine(c0).text; return rerender(); }
       if (g.date && (!isDate(g.date) || g.date <= today())) { draft.gmsg = T('The target date must be in the future.', 'Η ημερομηνία-στόχος πρέπει να είναι στο μέλλον.'); return rerender(); }
-      data.goals = { type: data.goals.type || null, w, fat, mus, waist: num(g.waist), date: g.date || null, setOn: today() };
+      data.goals = { type: data.goals.type || null, w, fat, mus, bone, waist: num(g.waist), date: g.date || null, setOn: today() };
       draft.goals = null; draft.gmsg = T('Targets saved.', 'Οι στόχοι αποθηκεύτηκαν.');
       persist();
     } },
@@ -589,9 +730,12 @@
         field(T('Body fat (kg)', 'Λίπος (kg)'), inputs.fatKg, now(mt.fatKg, ' kg')),
         field(T('Muscle (%)', 'Μύες (%)'), inputs.mus, [now(mt.M && mt.M.v, '%'), MUS_HINT].filter(Boolean).join(' · ')),
         field(T('Muscle (kg)', 'Μύες (kg)'), inputs.musKg, now(mt.musKg, ' kg')),
+        field(T('Bone (%)', 'Οστά (%)'), inputs.bone, now(mt.bone, '%')),
+        field(T('Bone (kg)', 'Οστά (kg)'), inputs.boneKg, now(mt.boneKg, ' kg')),
+        gTotal,
         field(T('Waist (cm)', 'Μέση (cm)'), numInput(g.waist, (v) => { g.waist = v; }, { step: '0.5' }), mt.meas.waist ? now(mt.meas.waist.v, ' cm') : T('add a waist measurement in the Body tab', 'πρόσθεσε μέτρηση μέσης στην καρτέλα Σώμα'), 'bd-wide'),
         field(T('By (optional)', 'Έως (προαιρετικά)'), h('input', { type: 'date', value: g.date, min: today(), oninput: (e) => { g.date = e.target.value; } }), null, 'bd-wide')),
-      h('button', { class: 'btn primary', type: 'submit', text: T('Save targets', 'Αποθήκευση στόχων') }),
+      h('button', { class: 'btn primary', type: 'submit', 'data-key': 'savetargets', text: T('Save targets', 'Αποθήκευση στόχων') }),
       draft.gmsg ? h('p', { class: 'bd-msg', role: 'status', text: draft.gmsg }) : null);
     draft.gmsg = '';
     host.appendChild(form);
@@ -617,6 +761,8 @@
         bar(T('Body fat', 'Λίπος'), mt.fatKg, gi.fatKg, null, 'kg'),
         bar(T('Muscle', 'Μύες'), mt.M && mt.M.v, data.goals.mus, first('mus'), '%'),
         bar(T('Muscle', 'Μύες'), mt.musKg, gi.musKg, null, 'kg'),
+        bar(T('Bone', 'Οστά'), mt.bone, gi.bone, first('bone'), '%'),
+        bar(T('Bone', 'Οστά'), mt.boneKg, gi.boneKg, null, 'kg'),
         bar(T('Waist', 'Μέση'), mt.meas.waist ? mt.meas.waist.v : null, data.goals.waist, first('waist'), 'cm')].forEach((b) => b && box.appendChild(b));
       if (gi.needPerWeek != null && mt.W) {
         const pct = (100 * gi.needPerWeek) / mt.W.v;
@@ -624,6 +770,18 @@
         const tooFast = gi.needPerWeek < 0 ? pct < (lean ? -0.5 : -1) : pct > 0.5;
         box.appendChild(h('p', { class: 'bd-hint' + (tooFast ? ' bd-warn' : ''), text: T(`To reach it by ${fmtDate(data.goals.date)}: ${sgn(gi.needPerWeek, 2)} kg a week (${sgn(pct, 2)}%).`, `Για να το πετύχεις έως ${fmtDate(data.goals.date)}: ${sgn(gi.needPerWeek, 2)} kg την εβδομάδα (${sgn(pct, 2)}%).`)
           + (!tooFast ? '' : lean ? T(' That is too fast to build muscle at the same time (keep it to 0.5% a week or less); give it more time.', ' Είναι πολύ γρήγορα για να χτίζεις ταυτόχρονα μύες (κράτα το έως 0,5% την εβδομάδα)· δώσε του περισσότερο χρόνο.') : T(' That is faster than is healthy; give it more time.', ' Είναι πιο γρήγορα από το υγιές· δώσε του περισσότερο χρόνο.')) }));
+      }
+      if (gi.boneNote) {
+        box.appendChild(h('p', { class: 'bd-hint bd-warn', text: gi.boneNote }));
+        box.appendChild(h('button', { class: 'btn bd-fix', type: 'button', 'data-key': 'bonefix', text: T('Put these numbers in my targets', 'Βάλε αυτά τα νούμερα στους στόχους μου'), onclick: () => {
+          g.bone = shown(gi.boneFix.bone);
+          if (gi.boneFix.mus) g.mus = shown(gi.boneFix.mus);
+          g.fatKg = ''; g.musKg = ''; g.boneKg = '';
+          draft.gmsg = T('Filled in above. Press “Save targets” to keep them.', 'Συμπληρώθηκαν παραπάνω. Πάτα «Αποθήκευση στόχων» για να μείνουν.');
+          rerender();
+          const save = host.querySelector('[data-key="savetargets"]');
+          if (save) save.focus();
+        } }));
       }
       if (gi.dMkg != null && gi.dMkg > 0) {
         const months = gi.dMkg / 0.75;
@@ -657,10 +815,26 @@ form.bd-grid3>.bd-h{grid-column:1/-1}
 .bd-f input:focus,.bd-f select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .bd-f small{display:block;font-size:.7rem;color:var(--ink-2);margin-top:2px;line-height:1.25}
 .bd-box .btn{margin-top:12px;justify-content:center;width:100%}
+.bd-box .bd-fix{margin-top:8px}
 .bd-msg{margin:8px 0 0;font-size:.85rem;font-weight:600}
 .bd-hint{margin:8px 0 0;font-size:.8rem;color:var(--ink-2)}
 .bd-warn{color:var(--accent);font-weight:600}
 .bd-lead{margin:-4px 0 10px}
+.bd-total{margin:2px 0 0;font-size:.8rem;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.bd-total.ok{color:var(--ink);font-weight:600}
+.bd-total.ok::before{content:"✓ "}
+.bd-total.bad{color:var(--accent);font-weight:600}
+.bd-comp{--c-fat:#2a78d6;--c-mus:#eb6834;--c-bone:#1baf7a;border:1px solid var(--line);border-radius:12px;background:var(--surface-2);padding:12px}
+.bd-seg{display:flex;gap:2px;height:8px}
+.bd-seg i{display:block;min-width:3px;border-radius:99px}
+.bd-comp .k-fat{background:var(--c-fat)}.bd-comp .k-mus{background:var(--c-mus)}.bd-comp .k-bone{background:var(--c-bone)}.bd-comp .k-other{background:var(--line)}
+.bd-legend{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:4px;font-size:.86rem}
+.bd-legend li{display:grid;grid-template-columns:10px minmax(0,1fr) auto 64px;align-items:baseline;gap:8px}
+.bd-legend li>i{width:10px;height:10px;border-radius:3px;align-self:center}
+.bd-legend b{font-variant-numeric:tabular-nums}
+.bd-legend small{color:var(--ink-2);text-align:right;font-variant-numeric:tabular-nums}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .bd-comp{--c-fat:#3987e5;--c-mus:#d95926;--c-bone:#199e70}}
+:root[data-theme="dark"] .bd-comp{--c-fat:#3987e5;--c-mus:#d95926;--c-bone:#199e70}
 .bd-opts{display:grid;gap:8px}
 .bd-opt{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1.5px solid var(--line);border-radius:10px;background:var(--surface);cursor:pointer}
 .bd-opt.on{border-color:var(--accent);background:var(--accent-soft)}
