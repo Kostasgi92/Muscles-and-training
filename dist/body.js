@@ -1,6 +1,6 @@
 /* Body data and goals for the program review.
    profile = {sex: 'm'|'f'|'', age, ageOn: "YYYY-MM-DD", height (cm)}
-   entries = [{id, date: "YYYY-MM-DD", at, w (kg), fat (%), mus (% muscle), bone (% bone), m: {neck, shoulders, chest, arm, forearm, waist, hips, thigh, calf} (cm)}]
+   entries = [{id, date: "YYYY-MM-DD", at, w (kg), fat (%), mus (% muscle), bone (% bone), m: {neck, shoulders, chest, arm, forearm, waist, tummy, hips, thigh, calf} (cm)}]
    goals   = {type: 'cut'|'bulk'|'maintain' (primary goal, chosen by the user; none = muscle gain), w, fat, mus, bone, waist, date, setOn}
    Fat + muscle + bone make 100% of the body when the scale reports "muscle mass" (everything that is not fat or bone):
    the missing one of the three is worked out, and three typed numbers that do not total 100% are refused. With
@@ -21,6 +21,8 @@
     ['arm', T('Arm / biceps', 'Μπράτσο / δικέφαλος'), T('flexed, at the peak of the biceps', 'σφιγμένος, στην κορυφή του δικεφάλου')],
     ['forearm', T('Forearm', 'Πήχης'), T('at the widest point', 'στο φαρδύτερο σημείο')],
     ['waist', T('Waist', 'Μέση'), T('at the navel, relaxed, after breathing out', 'στο ύψος του αφαλού, χαλαρά, μετά την εκπνοή')],
+    // κοιλιά: μόνο για την πορεία σου· οι έλεγχοι υγείας (μέση/ύψος, US Navy) έχουν όρια ορισμένα για τη μέση
+    ['tummy', T('Tummy', 'Κοιλιά'), T('at the widest point of the belly, usually a little below the navel, relaxed', 'στο φαρδύτερο σημείο της κοιλιάς, συνήθως λίγο κάτω από τον αφαλό, χαλαρά')],
     ['hips', T('Hips / glutes', 'Λεκάνη / γλουτοί'), T('at the widest point of the glutes', 'στο φαρδύτερο σημείο των γλουτών')],
     ['thigh', T('Thigh', 'Μηρός'), T('halfway between hip and knee', 'στη μέση ανάμεσα σε λεκάνη και γόνατο')],
     ['calf', T('Calf', 'Γάμπα'), T('at the widest point', 'στο φαρδύτερο σημείο')],
@@ -448,7 +450,7 @@
     const ms = MEAS.filter(([k]) => mt.meas[k]).map(([k, n]) => `${n} ${nf(mt.meas[k].v)}`);
     if (ms.length) l.push(T('Measurements (cm): ', 'Μετρήσεις (cm): ') + ms.join(', '));
     if (ctx.bone) l.push(T(`Sessions a week with heavy lifts that load the hips and spine: ${ctx.bone.sessions} (bone-health guideline: 2–3).`, `Προπονήσεις την εβδομάδα με βαριές ασκήσεις που φορτώνουν ισχίο και σπονδυλική στήλη: ${ctx.bone.sessions} (οδηγία για την υγεία των οστών: 2–3).`));
-    ['w', 'fat', 'mus', 'bone', 'waist', 'arm'].forEach((k) => { const r = rate(k); if (r) l.push(`${k}: ${sgn(r.perWeek, 2)}/${T('week', 'εβδ.')} (${nf(r.weeks)} ${T('weeks', 'εβδ.')})`); });
+    ['w', 'fat', 'mus', 'bone', 'waist', 'tummy', 'arm'].forEach((k) => { const r = rate(k); if (r) l.push(`${k}: ${sgn(r.perWeek, 2)}/${T('week', 'εβδ.')} (${nf(r.weeks)} ${T('weeks', 'εβδ.')})`); });
     const g = data.goals;
     if (g.w || g.fat || g.mus || g.bone || g.waist) l.push(T('Targets: ', 'Αριθμητικοί στόχοι: ') + [g.w ? T(`weight ${nf(g.w)} kg`, `βάρος ${nf(g.w)} kg`) : null, g.fat ? T(`body fat ${nf(g.fat)}%`, `λίπος ${nf(g.fat)}%`) : null, g.mus ? T(`muscle ${nf(g.mus)}%`, `μύες ${nf(g.mus)}%`) : null, g.bone ? T(`bone ${nf(g.bone)}%`, `οστά ${nf(g.bone)}%`) : null, g.waist ? T(`waist ${nf(g.waist)} cm`, `μέση ${nf(g.waist)} cm`) : null, g.date ? T(`by ${g.date}`, `έως ${g.date}`) : null].filter(Boolean).join(', '));
     if (f) {
